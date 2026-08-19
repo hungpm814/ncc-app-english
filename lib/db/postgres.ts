@@ -7,32 +7,71 @@ import { IELTSSpeakingAttempt, IELTSSpeakingResponse, IELTSSpeakingTopic, IELTSS
 // Global PostgreSQL connection pool instance for Next.js hot-reload handling
 const globalForPg = global as unknown as { pgPool: Pool; dbInitialized?: boolean };
 
-const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+export function getPool(): Pool {
+  if (globalForPg.pgPool) return globalForPg.pgPool;
 
-export const pool =
-  globalForPg.pgPool ||
-  (connectionString
-    ? new Pool({
-        connectionString,
-        ssl: { rejectUnauthorized: false },
-        max: 10,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 10000,
-      })
-    : new Pool({
-        host: process.env.DB_HOST || '127.0.0.1',
-        port: parseInt(process.env.DB_PORT || '8104', 10),
-        user: process.env.DB_USERNAME || 'postgres',
-        password: process.env.DB_PASSWORD || '123qwe',
-        database: process.env.DB_NAME || 'ncc_app_english',
-        max: 10,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 5000,
-      }));
+  const connectionString =
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.POSTGRES_URL_NO_SSL;
 
-if (process.env.NODE_ENV !== 'production') {
-  globalForPg.pgPool = pool;
+  const host = process.env.POSTGRES_HOST || process.env.DB_HOST;
+  const user = process.env.POSTGRES_USER || process.env.DB_USERNAME;
+  const password = process.env.POSTGRES_PASSWORD || process.env.DB_PASSWORD;
+  const database = process.env.POSTGRES_DATABASE || process.env.DB_NAME;
+
+  let newPool: Pool;
+
+  if (connectionString) {
+    newPool = new Pool({
+      connectionString,
+      ssl: { rejectUnauthorized: false },
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    });
+  } else if (host && host !== '127.0.0.1' && host !== 'localhost') {
+    newPool = new Pool({
+      host,
+      port: parseInt(process.env.POSTGRES_PORT || process.env.DB_PORT || '5432', 10),
+      user: user || 'postgres',
+      password: password || '',
+      database: database || 'postgres',
+      ssl: { rejectUnauthorized: false },
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    });
+  } else {
+    newPool = new Pool({
+      host: process.env.DB_HOST || '127.0.0.1',
+      port: parseInt(process.env.DB_PORT || '8104', 10),
+      user: process.env.DB_USERNAME || 'postgres',
+      password: process.env.DB_PASSWORD || '123qwe',
+      database: process.env.DB_NAME || 'ncc_app_english',
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    });
+  }
+
+  globalForPg.pgPool = newPool;
+  return newPool;
 }
+
+export const pool = new Proxy({} as Pool, {
+  get(_target, prop) {
+    const activePool = getPool();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const value = (activePool as any)[prop];
+    if (typeof value === 'function') {
+      return value.bind(activePool);
+    }
+    return value;
+  },
+});
 
 let isInitializing = false;
 
