@@ -7,18 +7,28 @@ import { IELTSSpeakingAttempt, IELTSSpeakingResponse, IELTSSpeakingTopic, IELTSS
 // Global PostgreSQL connection pool instance for Next.js hot-reload handling
 const globalForPg = global as unknown as { pgPool: Pool; dbInitialized?: boolean };
 
+const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+
 export const pool =
   globalForPg.pgPool ||
-  new Pool({
-    host: process.env.DB_HOST || '127.0.0.1',
-    port: parseInt(process.env.DB_PORT || '8104', 10),
-    user: process.env.DB_USERNAME || 'postgres',
-    password: process.env.DB_PASSWORD || '123qwe',
-    database: process.env.DB_NAME || 'ncc_app_english',
-    max: 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000,
-  });
+  (connectionString
+    ? new Pool({
+        connectionString,
+        ssl: { rejectUnauthorized: false },
+        max: 10,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
+      })
+    : new Pool({
+        host: process.env.DB_HOST || '127.0.0.1',
+        port: parseInt(process.env.DB_PORT || '8104', 10),
+        user: process.env.DB_USERNAME || 'postgres',
+        password: process.env.DB_PASSWORD || '123qwe',
+        database: process.env.DB_NAME || 'ncc_app_english',
+        max: 10,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 5000,
+      }));
 
 if (process.env.NODE_ENV !== 'production') {
   globalForPg.pgPool = pool;
