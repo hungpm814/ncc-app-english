@@ -301,6 +301,82 @@ export async function evaluateIELTSAttemptWithAI(
     });
   });
 
+  // Check if candidate produced any spoken transcript
+  const hasSpokenContent = questionItems.some(
+    (item) => item.liveTranscript && item.liveTranscript.trim().length > 0 && item.liveTranscript !== 'No transcript recorded'
+  );
+
+  if (!hasSpokenContent) {
+    console.log('[AI Evaluator] No spoken responses detected across all questions. Awarding Band 0.0.');
+    const zeroPerQuestionRecord: Record<string, IELTSPerQuestionAnalysis> = {};
+    questionItems.forEach((qItem) => {
+      zeroPerQuestionRecord[qItem.id] = {
+        question_id: qItem.id,
+        live_stt_transcript: 'No transcript recorded',
+        ai_generated_transcript: 'No transcript recorded',
+        match_percentage: 100,
+        feedback: 'No response was recorded for this question.',
+        improved_version: undefined,
+        grammar_corrections: undefined,
+      };
+    });
+
+    return {
+      attempt_id: attempt.id,
+      topic_title: topic.title,
+      part1_questions: topic.part1_questions,
+      part2_cue_card: topic.part2_cue_card,
+      part3_questions: topic.part3_questions,
+      responses: attempt.responses,
+      part2_notes: attempt.part2_notes,
+      overall_band: 0.0,
+      status_title: getIELTSStatusTitle(0.0),
+      summary_feedback: 'No spoken response was detected for any of the questions. To receive a valid evaluation and score, please ensure your microphone is working correctly and provide spoken answers to each prompt.',
+      criteria_scores: [
+        {
+          code: 'FC',
+          name: 'Fluency & Coherence',
+          score: 0.0,
+          summary: 'No language was produced to assess fluency, rhythm, or coherence.',
+          key_observations: ['No speech attempted or recorded.', 'Unable to evaluate fluency features.'],
+        },
+        {
+          code: 'LR',
+          name: 'Lexical Resource',
+          score: 0.0,
+          summary: 'No vocabulary was produced for assessment.',
+          key_observations: ['No lexical items produced.', 'Unable to evaluate vocabulary range.'],
+        },
+        {
+          code: 'GRA',
+          name: 'Grammatical Range & Accuracy',
+          score: 0.0,
+          summary: 'No grammatical structures were attempted.',
+          key_observations: ['No sentence structures produced.', 'Unable to evaluate grammatical range or accuracy.'],
+        },
+        {
+          code: 'PR',
+          name: 'Pronunciation',
+          score: 0.0,
+          summary: 'No spoken output was available to evaluate phonological features or intelligibility.',
+          key_observations: ['No audio content detected.', 'Unable to assess pronunciation.'],
+        },
+      ],
+      filler_words: [],
+      vocab_upgrades: [],
+      strengths: [],
+      areas_for_improvement: ['Provide spoken answers to each question prompt.', 'Ensure microphone permissions and audio recording are active.'],
+      criterion_feedback: {
+        fluency: 'No spoken response detected.',
+        vocabulary: 'No spoken response detected.',
+        grammar: 'No spoken response detected.',
+        pronunciation: 'No spoken response detected.',
+      },
+      estimated_band_reason: 'The candidate provided no audible speech or assessable language across all sections of the test. Under official IELTS assessment criteria, Band 0 is awarded when there is no assessable language produced.',
+      per_question_analysis: zeroPerQuestionRecord,
+    };
+  }
+
   const formattedResponses = questionItems
     .map(
       (item) => `[Question ID: ${item.id} | ${item.part}]
@@ -411,12 +487,23 @@ Please evaluate the candidate according to the official IELTS Examiner instructi
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const parsed: any = repairTruncatedJson(jsonString);
 
-    const fcScore = Math.min(9.0, Math.max(1.0, Number(parsed.fluency_coherence) || 6.0));
-    const lrScore = Math.min(9.0, Math.max(1.0, Number(parsed.lexical_resource) || 6.0));
-    const graScore = Math.min(9.0, Math.max(1.0, Number(parsed.grammatical_range_accuracy) || 6.0));
-    const prScore = Math.min(9.0, Math.max(1.0, Number(parsed.pronunciation) || 6.0));
+    const parseScore = (val: any) => {
+      const num = Number(val);
+      if (!isNaN(num) && num >= 0.0 && num <= 9.0) {
+        return num;
+      }
+      return 0.0;
+    };
 
-    const overallBand = Number(parsed.overall_band) || Math.round(((fcScore + lrScore + graScore + prScore) / 4) * 2) / 2;
+    const fcScore = parseScore(parsed.fluency_coherence);
+    const lrScore = parseScore(parsed.lexical_resource);
+    const graScore = parseScore(parsed.grammatical_range_accuracy);
+    const prScore = parseScore(parsed.pronunciation);
+
+    const rawOverall = Number(parsed.overall_band);
+    const overallBand = !isNaN(rawOverall) && rawOverall >= 0.0 && rawOverall <= 9.0
+      ? rawOverall
+      : Math.round(((fcScore + lrScore + graScore + prScore) / 4) * 2) / 2;
 
     const perQuestionRecord: Record<string, IELTSPerQuestionAnalysis> = {};
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
