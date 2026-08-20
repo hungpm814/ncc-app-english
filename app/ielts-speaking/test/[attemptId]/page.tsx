@@ -8,6 +8,8 @@ import { PrepTimer } from '@/components/ielts/PrepTimer';
 import { IELTSSpeakingAttempt, IELTSSpeakingTopic, IELTSPart, IELTSSpeakingResponse } from '@/types/ielts';
 import { Mic, ArrowRight, CheckCircle2, Send, Sparkles, Clock, BookOpen, Flag } from 'lucide-react';
 
+const pendingCancels = new Map<string, NodeJS.Timeout>();
+
 export default function IELTSSpeakingTestPage({ params }: { params: Promise<{ attemptId: string }> }) {
   const { attemptId } = use(params);
   const router = useRouter();
@@ -59,9 +61,15 @@ export default function IELTSSpeakingTestPage({ params }: { params: Promise<{ at
     fetchAttempt();
   }, [attemptId]);
 
-  // Handle auto-cancellation if candidate closes browser window/tab without submitting
+  // Handle auto-cancellation if candidate leaves page (back/home navigation or browser close) without submitting
   useEffect(() => {
-    const handleBeforeUnload = () => {
+    // If component remounted within threshold (e.g. React StrictMode), cancel pending cancel
+    if (pendingCancels.has(attemptId)) {
+      clearTimeout(pendingCancels.get(attemptId));
+      pendingCancels.delete(attemptId);
+    }
+
+    const triggerCancel = () => {
       if (!isSubmittedRef.current) {
         fetch('/api/ielts/cancel', {
           method: 'POST',
@@ -72,10 +80,24 @@ export default function IELTSSpeakingTestPage({ params }: { params: Promise<{ at
       }
     };
 
+    const handleBeforeUnload = () => {
+      triggerCancel();
+    };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+
+      // When unmounting due to SPA navigation (Back / Home button), schedule cancellation after 500ms
+      if (!isSubmittedRef.current) {
+        const timer = setTimeout(() => {
+          triggerCancel();
+          pendingCancels.delete(attemptId);
+        }, 500);
+
+        pendingCancels.set(attemptId, timer);
+      }
     };
   }, [attemptId]);
 
