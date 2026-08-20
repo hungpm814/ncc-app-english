@@ -21,6 +21,27 @@ const VOCAB_UPGRADE_MAP: Array<{ original: string; upgrade: string; context_exam
   { original: 'help', upgrade: 'facilitate / assist', context_example: 'Technology facilitates seamless global communication.' },
 ];
 
+export function getIELTSStatusTitle(overallBand: number): string {
+  if (overallBand >= 9.0) return 'Expert Speaker (Band 9.0)';
+  if (overallBand >= 8.5) return 'Very Good Speaker (Band 8.5)';
+  if (overallBand >= 8.0) return 'Very Good Speaker (Band 8.0)';
+  if (overallBand >= 7.5) return 'Good Speaker (Band 7.5)';
+  if (overallBand >= 7.0) return 'Good Speaker (Band 7.0)';
+  if (overallBand >= 6.5) return 'Competent Speaker (Band 6.5)';
+  if (overallBand >= 6.0) return 'Competent Speaker (Band 6.0)';
+  if (overallBand >= 5.5) return 'Modest Speaker (Band 5.5)';
+  if (overallBand >= 5.0) return 'Modest Speaker (Band 5.0)';
+  if (overallBand >= 4.5) return 'Limited Speaker (Band 4.5)';
+  if (overallBand >= 4.0) return 'Limited Speaker (Band 4.0)';
+  if (overallBand >= 3.5) return 'Extremely Limited Speaker (Band 3.5)';
+  if (overallBand >= 3.0) return 'Extremely Limited Speaker (Band 3.0)';
+  if (overallBand >= 2.5) return 'Intermittent Speaker (Band 2.5)';
+  if (overallBand >= 2.0) return 'Intermittent Speaker (Band 2.0)';
+  if (overallBand >= 1.5) return 'Non Speaker / Beginner (Band 1.5)';
+  if (overallBand >= 1.0) return 'Non Speaker / Beginner (Band 1.0)';
+  return 'Did Not Attempt / No Band Score';
+}
+
 export function calculateIELTSScore(
   attempt: IELTSSpeakingAttempt,
   topic: IELTSSpeakingTopic
@@ -81,10 +102,7 @@ export function calculateIELTSScore(
 
   const overallBand = Math.round(((fcScore + lrScore + graScore + prScore) / 4) * 2) / 2;
 
-  let statusTitle = 'Good User Band Performance';
-  if (overallBand >= 8.0) statusTitle = 'Expert Speaker (Band 8.0+)';
-  else if (overallBand >= 7.0) statusTitle = 'Good Operational Speaker (Band 7.0+)';
-  else if (overallBand >= 6.0) statusTitle = 'Competent Speaker (Band 6.0+)';
+  const statusTitle = getIELTSStatusTitle(overallBand);
 
   return {
     attempt_id: attempt.id,

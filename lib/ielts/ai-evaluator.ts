@@ -4,7 +4,7 @@ import {
   IELTSScoreResult,
   IELTSPerQuestionAnalysis,
 } from '@/types/ielts';
-import { calculateIELTSScore } from './score-calculator';
+import { calculateIELTSScore, getIELTSStatusTitle } from './score-calculator';
 
 
 export const OFFICIAL_IELTS_EXAMINER_PROMPT = `# ROLE
@@ -18,7 +18,14 @@ Be objective, evidence-based, and consistent.
 
 Evaluate only what the candidate actually says.
 
-Never assume ability beyond the provided transcript or audio.
+--------------------------------------------------
+IMPORTANT INSTRUCTION ON BROWSER STT vs FULL TRANSCRIPT
+--------------------------------------------------
+1. The provided "Browser STT (Raw/Partial)" text is recorded by client-side Web Speech API and FREQUENTLY CUTS OFF OR GETS TRUNCATED mid-response while the candidate is still speaking.
+2. For each question, your output field "ai_generated_transcript" MUST represent the candidate's FULL, COMPLETE, AND UNTRUNCATED spoken response for the entire duration of their answer.
+3. If the Browser STT snippet ends abruptly or cuts off mid-sentence/mid-thought, reconstruct and extend the complete, natural, and grammatically complete spoken response that matches the candidate's line of thought. Do NOT stop early just because Browser STT was cut off.
+4. "match_percentage": Calculate what percentage of the full complete spoken transcript was successfully captured in the raw Browser STT snippet (0–100%).
+5. Base your official IELTS band scoring (FC, LR, GRA, PR) on the candidate's complete reconstructed response.
 
 --------------------------------------------------
 SCORING CRITERIA
@@ -101,9 +108,9 @@ Return ONLY valid JSON matching this exact structure:
   "per_question_items": [
     {
       "question_id": "p1-q1",
-      "live_stt_transcript": "...",
-      "ai_generated_transcript": "Detailed polished transcript matching actual spoken response",
-      "match_percentage": 88,
+      "live_stt_transcript": "Raw Browser STT snippet (may be truncated)",
+      "ai_generated_transcript": "FULL complete reconstructed spoken transcript. Completes any cut-off sentences naturally.",
+      "match_percentage": 75,
       "feedback": "Concise feedback for this answer"
     }
   ]
@@ -137,7 +144,7 @@ export async function evaluateIELTSAttemptWithAI(
   const model = process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022';
 
   // Construct structured question & transcript prompt
-  const questionItems: Array<{ id: string; part: string; questionText: string; liveTranscript: string }> = [];
+  const questionItems: Array<{ id: string; part: string; questionText: string; liveTranscript: string; duration: number }> = [];
 
   // Part 1
   topic.part1_questions.forEach((q) => {
@@ -147,6 +154,7 @@ export async function evaluateIELTSAttemptWithAI(
       part: 'Part 1',
       questionText: q.question_text,
       liveTranscript: resp?.transcript || 'No transcript recorded',
+      duration: resp?.duration_seconds || 0,
     });
   });
 
@@ -159,6 +167,7 @@ export async function evaluateIELTSAttemptWithAI(
       part: 'Part 2 Cue Card',
       questionText: `${card.prompt_lead} Points: ${card.bullet_points.join(', ')}`,
       liveTranscript: resp?.transcript || 'No transcript recorded',
+      duration: resp?.duration_seconds || 0,
     });
   }
 
@@ -170,14 +179,16 @@ export async function evaluateIELTSAttemptWithAI(
       part: 'Part 3',
       questionText: q.question_text,
       liveTranscript: resp?.transcript || 'No transcript recorded',
+      duration: resp?.duration_seconds || 0,
     });
   });
 
   const formattedResponses = questionItems
     .map(
       (item) => `[Question ID: ${item.id} | ${item.part}]
-Question: "${item.questionText}"
-Live STT Transcript: "${item.liveTranscript}"`
+Question Prompt: "${item.questionText}"
+Recording Duration: ${item.duration > 0 ? `${item.duration} seconds` : 'Recorded'}
+Browser STT Transcript (Raw/Partial): "${item.liveTranscript}"`
     )
     .join('\n\n');
 
@@ -186,6 +197,8 @@ Part 2 Preparation Notes by Candidate: "${attempt.part2_notes || 'None'}"
 
 CANDIDATE QUESTION RESPONSES:
 ${formattedResponses}
+
+REMINDER: The Browser STT transcript may be truncated mid-sentence. For "ai_generated_transcript", provide the FULL complete, un-truncated response representing what the candidate spoke during the entire recording duration, completing any cut-off sentences naturally.
 
 Please evaluate the candidate according to the official IELTS Examiner instructions and return JSON only.`;
 
@@ -300,6 +313,7 @@ Please evaluate the candidate according to the official IELTS Examiner instructi
     return {
       ...fallbackResult,
       overall_band: overallBand,
+      status_title: getIELTSStatusTitle(overallBand),
       summary_feedback: parsed.overall_feedback || fallbackResult.summary_feedback,
       criteria_scores: [
         {

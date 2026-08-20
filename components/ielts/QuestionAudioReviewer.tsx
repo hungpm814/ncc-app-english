@@ -227,7 +227,7 @@ export function QuestionAudioReviewer({ result }: { result: IELTSScoreResult }) 
                         }`}
                       >
                         <CheckCircle2 className="w-3 h-3" />
-                        Clarity Match: {matchPct}%
+                        STT Capture Match: {matchPct}%
                       </span>
                     ) : null}
                   </div>
