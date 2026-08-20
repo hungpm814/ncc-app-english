@@ -20,7 +20,15 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
       try {
         setLoading(true);
         const res = await fetch(`/api/ielts/${attemptId}`);
-        const data = await res.json();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let data: any;
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          data = await res.json();
+        } else {
+          const text = await res.text();
+          throw new Error(text || `Server returned non-JSON response (${res.status})`);
+        }
 
         if (!res.ok || !data.success) {
           throw new Error(data.error || 'Failed to load result report');
@@ -54,7 +62,15 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
         body: JSON.stringify({ attemptId }),
       });
 
-      const data = await res.json();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let data: any;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(text || `Server returned non-JSON response (${res.status})`);
+      }
 
       if (!res.ok || !data.success || !data.result) {
         throw new Error(data.error || 'Failed to re-score attempt with AI');

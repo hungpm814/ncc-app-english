@@ -118,28 +118,23 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         stopTimer();
         stopSpeechRecognition();
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const objectUrl = URL.createObjectURL(audioBlob);
+        setAudioUrl(objectUrl);
 
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
-        reader.onloadend = () => {
-          const base64Url = reader.result as string;
-          setAudioUrl(base64Url);
-
-          const fallbackTranscripts: Record<string, string> = {
-            'p1-q1': 'I use my laptop and smartphone every day for attending virtual meetings, reading emails, and writing code.',
-            'p1-q2': 'I prefer messaging apps for quick updates, but face-to-face communication is definitely more personal.',
-            'p2-cue1': 'The piece of technology I find extremely useful is my modern smartphone. I acquired it last year and it has revolutionized how I organize my daily workflow.',
-          };
-
-          const finalTranscript =
-            transcriptRef.current.trim() ||
-            fallbackTranscripts[questionId] ||
-            'In my response, I discussed key aspects of the question and shared my personal insights clearly.';
-
-          if (onAudioRecorded) {
-            onAudioRecorded(base64Url, finalTranscript, recordingTimeRef.current);
-          }
+        const fallbackTranscripts: Record<string, string> = {
+          'p1-q1': 'I use my laptop and smartphone every day for attending virtual meetings, reading emails, and writing code.',
+          'p1-q2': 'I prefer messaging apps for quick updates, but face-to-face communication is definitely more personal.',
+          'p2-cue1': 'The piece of technology I find extremely useful is my modern smartphone. I acquired it last year and it has revolutionized how I organize my daily workflow.',
         };
+
+        const finalTranscript =
+          transcriptRef.current.trim() ||
+          fallbackTranscripts[questionId] ||
+          'In my response, I discussed key aspects of the question and shared my personal insights clearly.';
+
+        if (onAudioRecorded) {
+          onAudioRecorded(objectUrl, finalTranscript, recordingTimeRef.current);
+        }
 
         stream.getTracks().forEach((track) => track.stop());
       };
