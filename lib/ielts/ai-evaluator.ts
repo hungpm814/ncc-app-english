@@ -206,20 +206,38 @@ Please evaluate the candidate according to the official IELTS Examiner instructi
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
 
+    const isOpenAIFormat = endpoint.includes('/chat/completions');
+    console.log(`[AI Evaluator] Requesting endpoint: ${endpoint} (Model: ${model}, Format: ${isOpenAIFormat ? 'OpenAI' : 'Anthropic'})`);
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    };
+
+    const reqBody = isOpenAIFormat
+      ? {
+          model,
+          max_tokens: 4096,
+          stream: true,
+          messages: [
+            { role: 'system', content: OFFICIAL_IELTS_EXAMINER_PROMPT },
+            { role: 'user', content: userPrompt },
+          ],
+        }
+      : {
+          model,
+          max_tokens: 4096,
+          stream: true,
+          system: OFFICIAL_IELTS_EXAMINER_PROMPT,
+          messages: [{ role: 'user', content: userPrompt }],
+        };
+
     const res = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 4096,
-        stream: true,
-        system: OFFICIAL_IELTS_EXAMINER_PROMPT,
-        messages: [{ role: 'user', content: userPrompt }],
-      }),
+      headers,
+      body: JSON.stringify(reqBody),
       signal: controller.signal,
     });
 
@@ -247,9 +265,12 @@ Please evaluate the candidate according to the official IELTS Examiner instructi
           if (jsonStr && jsonStr !== '[DONE]') {
             try {
               const parsedChunk = JSON.parse(jsonStr);
-              if (parsedChunk.delta?.text) {
-                rawContent += parsedChunk.delta.text;
-              }
+              const textChunk =
+                parsedChunk.choices?.[0]?.delta?.content ||
+                parsedChunk.delta?.text ||
+                parsedChunk.content?.[0]?.text ||
+                '';
+              rawContent += textChunk;
             } catch {
               // ignore invalid JSON chunks in SSE stream
             }
@@ -262,6 +283,8 @@ Please evaluate the candidate according to the official IELTS Examiner instructi
       console.warn('[AI Evaluator Warning] Empty response content. Using fallback result.');
       return fallbackResult;
     }
+
+    console.log(`[AI Evaluator] Received response (${rawContent.length} chars). Parsing JSON...`);
 
     // Strip any markdown code block wrap (e.g. ```json ... ```)
     const jsonMatch = rawContent.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
