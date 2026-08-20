@@ -6,7 +6,6 @@ import {
 } from '@/types/ielts';
 import { calculateIELTSScore } from './score-calculator';
 
-const DEFAULT_OPENAI_KEY = 'sk-cq38hrGZIM2MleU3Wk7k6SP007zWQ9MpMHuFzhjPsXrUFR1f';
 
 export const OFFICIAL_IELTS_EXAMINER_PROMPT = `# ROLE
 
@@ -133,9 +132,9 @@ export async function evaluateIELTSAttemptWithAI(
 ): Promise<IELTSScoreResult> {
   const fallbackResult = calculateIELTSScore(attempt, topic);
 
-  const apiKey = process.env.OPENAI_API_KEY || DEFAULT_OPENAI_KEY;
-  const baseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
-  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const apiKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || '';
+  const endpoint = process.env.ANTHROPIC_ENDPOINT || 'https://api.anthropic.com/v1/messages';
+  const model = process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022';
 
   // Construct structured question & transcript prompt
   const questionItems: Array<{ id: string; part: string; questionText: string; liveTranscript: string }> = [];
@@ -191,34 +190,72 @@ ${formattedResponses}
 Please evaluate the candidate according to the official IELTS Examiner instructions and return JSON only.`;
 
   try {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         model,
-        messages: [
-          { role: 'system', content: OFFICIAL_IELTS_EXAMINER_PROMPT },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.3,
-        response_format: { type: 'json_object' },
+        max_tokens: 4096,
+        stream: true,
+        system: OFFICIAL_IELTS_EXAMINER_PROMPT,
+        messages: [{ role: 'user', content: userPrompt }],
       }),
+      signal: controller.signal,
     });
 
-    if (!res.ok) {
+    clearTimeout(timeoutId);
+
+    if (!res.ok || !res.body) {
       console.warn(`[AI Evaluator Warning] API status ${res.status}. Using rule-based score fallback.`);
       return fallbackResult;
     }
 
-    const data = await res.json();
-    const rawContent = data.choices?.[0]?.message?.content;
-    if (!rawContent) return fallbackResult;
+    // Stream SSE aggregation
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let rawContent = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr && jsonStr !== '[DONE]') {
+            try {
+              const parsedChunk = JSON.parse(jsonStr);
+              if (parsedChunk.delta?.text) {
+                rawContent += parsedChunk.delta.text;
+              }
+            } catch {
+              // ignore invalid JSON chunks in SSE stream
+            }
+          }
+        }
+      }
+    }
+
+    if (!rawContent) {
+      console.warn('[AI Evaluator Warning] Empty response content. Using fallback result.');
+      return fallbackResult;
+    }
+
+    // Strip any markdown code block wrap (e.g. ```json ... ```)
+    const jsonMatch = rawContent.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    const jsonString = jsonMatch ? jsonMatch[1] : rawContent;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parsed: any = JSON.parse(rawContent);
+    const parsed: any = JSON.parse(jsonString.trim());
 
     const fcScore = Math.min(9.0, Math.max(1.0, Number(parsed.fluency_coherence) || fallbackResult.criteria_scores[0].score));
     const lrScore = Math.min(9.0, Math.max(1.0, Number(parsed.lexical_resource) || fallbackResult.criteria_scores[1].score));

@@ -37,6 +37,38 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
     fetchResult();
   }, [attemptId]);
 
+  const [rescoring, setRescoring] = useState(false);
+  const [rescoreSuccess, setRescoreSuccess] = useState(false);
+
+  async function handleRescoreWithAI() {
+    try {
+      setRescoring(true);
+      setError(null);
+      setRescoreSuccess(false);
+
+      const res = await fetch('/api/ielts/rescore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attemptId }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success || !data.result) {
+        throw new Error(data.error || 'Failed to re-score attempt with AI');
+      }
+
+      setResult(data.result);
+      setRescoreSuccess(true);
+      setTimeout(() => setRescoreSuccess(false), 5000);
+    } catch (err) {
+      console.error('Rescore error:', err);
+      setError((err as Error).message);
+    } finally {
+      setRescoring(false);
+    }
+  }
+
   if (loading || !result) {
     return (
       <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-center items-center">
@@ -55,13 +87,31 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
         <div className="relative overflow-hidden bg-gradient-to-br from-amber-500 via-amber-600 to-purple-700 text-white rounded-3xl p-8 md:p-12 shadow-xl">
           <div className="flex flex-col md:flex-row items-center justify-between gap-8">
             <div className="space-y-3 text-center md:text-left">
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-white/20 border border-white/30 text-white text-xs font-bold rounded-full uppercase tracking-wider">
-                <Award className="w-4 h-4" />
-                <span>IELTS Speaking Evaluation Report</span>
+              <div className="flex flex-wrap items-center justify-center md:justify-start gap-2">
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-white/20 border border-white/30 text-white text-xs font-bold rounded-full uppercase tracking-wider">
+                  <Award className="w-4 h-4" />
+                  <span>IELTS Speaking Evaluation Report</span>
+                </div>
+
+                <button
+                  onClick={handleRescoreWithAI}
+                  disabled={rescoring}
+                  className="inline-flex items-center gap-2 px-4 py-1.5 bg-white hover:bg-amber-50 text-purple-900 text-xs font-extrabold rounded-full transition-all shadow-md active:scale-95 disabled:opacity-50"
+                  title="Gửi bài làm qua API AI để chấm điểm lại"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${rescoring ? 'animate-spin' : ''}`} />
+                  <span>{rescoring ? 'AI Đang Chấm Điểm Lại...' : '🤖 Chấm Điểm Lại Với AI'}</span>
+                </button>
               </div>
 
               <h1 className="text-3xl md:text-4xl font-extrabold">{result.topic_title}</h1>
               <p className="text-amber-50 max-w-xl text-sm leading-relaxed">{result.summary_feedback}</p>
+
+              {rescoreSuccess && (
+                <div className="inline-block px-3 py-1 bg-emerald-500/90 text-white text-xs font-bold rounded-lg animate-fade-in">
+                  ✓ Đã cập nhật kết quả chấm điểm AI mới nhất thành công!
+                </div>
+              )}
             </div>
 
             {/* Band Score Badge */}
