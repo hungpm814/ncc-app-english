@@ -3,6 +3,8 @@ import { getSession } from '@/lib/auth/session';
 import { pgDb } from '@/lib/db/postgres';
 import { evaluateIELTSAttemptWithAI } from '@/lib/ielts/ai-evaluator';
 
+export const maxDuration = 60; // Extend Vercel function timeout for AI scoring
+
 export async function POST(req: NextRequest) {
   const session = await getSession();
 

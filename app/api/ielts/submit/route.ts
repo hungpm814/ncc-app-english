@@ -3,6 +3,8 @@ import { getSession } from '@/lib/auth/session';
 import { pgDb } from '@/lib/db/postgres';
 import { evaluateIELTSAttemptWithAI } from '@/lib/ielts/ai-evaluator';
 
+export const maxDuration = 60; // Extend Vercel function timeout for AI scoring
+
 export async function POST(req: NextRequest) {
   const session = await getSession();
 
@@ -58,6 +60,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Immediately update status to 'submitted' so attempt cannot be lost or cancelled
+    await pgDb.updateIELTSAttemptStatus(attemptId, 'submitted', 'part3');
+
     // Refresh attempt with saved responses
     const updatedAttempt = await pgDb.getIELTSAttempt(attemptId);
     if (!updatedAttempt) {
@@ -67,14 +72,16 @@ export async function POST(req: NextRequest) {
     // Calculate score using AI Evaluator
     const scoreResult = await evaluateIELTSAttemptWithAI(updatedAttempt, topic);
 
-    // Save status and score result to PostgreSQL
-    await pgDb.updateIELTSAttemptStatus(
-      attemptId,
-      'submitted',
-      'part3',
-      scoreResult?.overall_band,
-      scoreResult || undefined
-    );
+    // Save status and score result to PostgreSQL if AI returned a result
+    if (scoreResult) {
+      await pgDb.updateIELTSAttemptStatus(
+        attemptId,
+        'submitted',
+        'part3',
+        scoreResult.overall_band,
+        scoreResult
+      );
+    }
 
     return NextResponse.json({
       success: true,
