@@ -121,28 +121,12 @@ export default function IELTSSpeakingTestPage({ params }: { params: Promise<{ at
       setSubmitting(true);
       setError(null);
 
-      // Sanitize responses to ensure base64 audio payload doesn't exceed Vercel function size limit (4.5MB)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sanitizedResponses: Record<string, any> = {};
-      Object.entries(responses).forEach(([qId, resItem]) => {
-        sanitizedResponses[qId] = {
-          question_id: resItem.question_id,
-          part: resItem.part,
-          audio_url: resItem.audio_url && resItem.audio_url.startsWith('data:') && resItem.audio_url.length > 50000
-            ? undefined
-            : resItem.audio_url,
-          transcript: resItem.transcript,
-          duration_seconds: resItem.duration_seconds,
-          answered_at: resItem.answered_at,
-        };
-      });
-
       const res = await fetch('/api/ielts/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           attemptId,
-          responses: sanitizedResponses,
+          responses,
           part2Notes,
         }),
       });
