@@ -177,31 +177,86 @@ export function QuestionAudioReviewer({ result }: { result: IELTSScoreResult }) 
           )}
         </div>
 
-        {/* Speech Transcript Script Section */}
-        <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-bold text-slate-700 uppercase tracking-wider">
-              <FileText className="w-4 h-4 text-emerald-600" />
-              <span>Speech-to-Text Transcript</span>
-            </div>
-            {response?.transcript && (
-              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                <CheckCircle2 className="w-3 h-3" />
-                Transcribed
-              </span>
-            )}
-          </div>
+        {/* Speech Transcript Comparison & AI Analysis Section */}
+        {(() => {
+          const aiAnalysis = result.per_question_analysis?.[currentItem.id];
+          const liveStt = response?.transcript || aiAnalysis?.live_stt_transcript;
+          const aiTranscript = aiAnalysis?.ai_generated_transcript;
+          const matchPct = aiAnalysis?.match_percentage;
 
-          <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-slate-800 text-sm leading-relaxed font-medium min-h-[70px]">
-            {response?.transcript ? (
-              <span className="italic">"{response.transcript}"</span>
-            ) : (
-              <span className="text-slate-400 italic text-xs">
-                No transcript captured for this question.
-              </span>
-            )}
-          </div>
-        </div>
+          return (
+            <div className="space-y-4">
+              {/* Dual Transcript Comparison Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 1. Live Speech-To-Text */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      <Mic className="w-4 h-4 text-purple-600" />
+                      <span>Live Speech-to-Text</span>
+                    </div>
+                    <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
+                      Browser STT
+                    </span>
+                  </div>
+
+                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 text-slate-800 text-xs leading-relaxed font-medium min-h-[80px]">
+                    {liveStt ? (
+                      <span className="italic">"{liveStt}"</span>
+                    ) : (
+                      <span className="text-slate-400 italic">No live STT recorded.</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. AI Generated & Refined Transcript */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      <FileText className="w-4 h-4 text-emerald-600" />
+                      <span>AI Examiner Transcript</span>
+                    </div>
+                    {matchPct !== undefined ? (
+                      <span
+                        className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          matchPct >= 80
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : matchPct >= 60
+                            ? 'bg-amber-50 text-amber-800 border-amber-200'
+                            : 'bg-rose-50 text-rose-700 border-rose-200'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-3 h-3" />
+                        Clarity Match: {matchPct}%
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 text-slate-800 text-xs leading-relaxed font-medium min-h-[80px]">
+                    {aiTranscript ? (
+                      <span className="italic">"{aiTranscript}"</span>
+                    ) : (
+                      <span className="text-slate-400 italic">AI transcript pending.</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Per-Question AI Examiner Feedback */}
+              {aiAnalysis?.feedback && (
+                <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-4 space-y-1">
+                  <div className="flex items-center gap-2 text-xs font-bold text-purple-900 uppercase tracking-wider">
+                    <MessageSquare className="w-4 h-4 text-purple-600" />
+                    <span>AI Examiner Question Feedback</span>
+                  </div>
+                  <p className="text-xs text-purple-800 leading-relaxed font-medium">
+                    {aiAnalysis.feedback}
+                  </p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

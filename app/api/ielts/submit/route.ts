@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { pgDb } from '@/lib/db/postgres';
-import { calculateIELTSScore } from '@/lib/ielts/score-calculator';
+import { evaluateIELTSAttemptWithAI } from '@/lib/ielts/ai-evaluator';
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -64,8 +64,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Attempt refresh failed' }, { status: 500 });
     }
 
-    // Calculate score
-    const scoreResult = calculateIELTSScore(updatedAttempt, topic);
+    // Calculate score using AI Evaluator
+    const scoreResult = await evaluateIELTSAttemptWithAI(updatedAttempt, topic);
 
     // Save status and score result to PostgreSQL
     await pgDb.updateIELTSAttemptStatus(

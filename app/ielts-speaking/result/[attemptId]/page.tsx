@@ -75,6 +75,19 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
           </div>
         </div>
 
+        {/* Estimated Band Reason Card */}
+        {result.estimated_band_reason && (
+          <div className="bg-purple-50/80 border border-purple-200 rounded-3xl p-6 shadow-sm space-y-2">
+            <div className="flex items-center gap-2 text-xs font-bold text-purple-900 uppercase tracking-wider">
+              <Sparkles className="w-4 h-4 text-purple-600" />
+              <span>Official IELTS Examiner Band Rationale</span>
+            </div>
+            <p className="text-sm text-purple-900 font-medium leading-relaxed">
+              {result.estimated_band_reason}
+            </p>
+          </div>
+        )}
+
         {error && (
           <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl text-sm font-medium">
             {error}

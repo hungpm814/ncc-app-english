@@ -75,6 +75,15 @@ export interface IELTSVocabUpgrade {
   context_example: string;
 }
 
+export interface IELTSPerQuestionAnalysis {
+  question_id: string;
+  question_text?: string;
+  live_stt_transcript: string;
+  ai_generated_transcript: string;
+  match_percentage: number;
+  feedback: string;
+}
+
 export interface IELTSScoreResult {
   attempt_id: string;
   topic_title: string;
@@ -91,4 +100,12 @@ export interface IELTSScoreResult {
   part3_questions: IELTSPart3Question[];
   responses: Record<string, IELTSSpeakingResponse>;
   part2_notes?: string;
+  criterion_feedback?: {
+    fluency: string;
+    vocabulary: string;
+    grammar: string;
+    pronunciation: string;
+  };
+  estimated_band_reason?: string;
+  per_question_analysis?: Record<string, IELTSPerQuestionAnalysis>;
 }
