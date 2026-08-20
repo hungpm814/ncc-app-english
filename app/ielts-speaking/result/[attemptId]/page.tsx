@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Navbar } from '@/components/Navbar';
 import { QuestionAudioReviewer } from '@/components/ielts/QuestionAudioReviewer';
 import { IELTSScoreResult } from '@/types/ielts';
-import { Award, Sparkles, AlertCircle, ArrowUpRight, RefreshCw, ChevronRight } from 'lucide-react';
+import { Award, Sparkles, AlertCircle, ArrowUpRight, RefreshCw, ChevronRight, Clock } from 'lucide-react';
 
 export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ attemptId: string }> }) {
   const { attemptId } = use(params);
@@ -22,11 +22,11 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
         const res = await fetch(`/api/ielts/${attemptId}`);
         const data = await res.json();
 
-        if (!res.ok || !data.success || !data.result) {
+        if (!res.ok || !data.success) {
           throw new Error(data.error || 'Failed to load result report');
         }
 
-        setResult(data.result);
+        setResult(data.result || null);
       } catch (err) {
         console.error('Fetch result error:', err);
         setError((err as Error).message);
@@ -71,11 +71,57 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
     }
   }
 
-  if (loading || !result) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-center items-center">
-        <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mb-4" />
+        <div className="w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mb-4" />
         <p className="text-slate-600 font-medium">Analyzing speech transcripts & generating Band Score report...</p>
+      </div>
+    );
+  }
+
+  if (!result) {
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
+        <Navbar />
+        <main className="flex-1 max-w-2xl mx-auto px-4 py-20 w-full flex flex-col items-center justify-center text-center space-y-6">
+          <div className="p-4 bg-purple-100 text-purple-700 rounded-full shadow-inner">
+            <Clock className="w-12 h-12" />
+          </div>
+          <div className="space-y-2">
+            <div className="inline-block px-3 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full uppercase tracking-wider">
+              Status: Evaluation Pending
+            </div>
+            <h1 className="text-3xl font-extrabold text-slate-900">AI Scoring Pending</h1>
+            <p className="text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+              Bài thi Speaking của bạn đã được ghi nhận. Hệ thống hiện chưa có bản chấm điểm từ AI Examiner. Nhấn nút bên dưới để tiến hành chấm điểm bằng AI.
+            </p>
+          </div>
+
+          {error && (
+            <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl text-xs font-medium max-w-md w-full">
+              {error}
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row items-center gap-4 pt-2">
+            <button
+              onClick={handleRescoreWithAI}
+              disabled={rescoring}
+              className="inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-2xl shadow-lg shadow-purple-200 transition-all disabled:opacity-50 active:scale-95"
+            >
+              <RefreshCw className={`w-4 h-4 ${rescoring ? 'animate-spin' : ''}`} />
+              <span>{rescoring ? 'Đang chấm điểm với AI...' : '🤖 Chấm điểm với AI (Re-score)'}</span>
+            </button>
+
+            <button
+              onClick={() => router.push('/ielts-speaking')}
+              className="inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-2xl border border-slate-200 transition-all"
+            >
+              <span>Quay lại trang đề thi</span>
+            </button>
+          </div>
+        </main>
       </div>
     );
   }

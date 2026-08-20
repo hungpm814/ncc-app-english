@@ -37,8 +37,8 @@ export async function POST(req: NextRequest) {
       attemptId,
       'submitted',
       attempt.current_part || 'part3',
-      scoreResult.overall_band,
-      scoreResult
+      scoreResult?.overall_band,
+      scoreResult || undefined
     );
 
     return NextResponse.json({

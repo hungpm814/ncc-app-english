@@ -78,51 +78,42 @@ Evaluate: sentence variety, complexity, accuracy, error frequency.
 PRONUNCIATION
 --------------------------------------------------
 Accent does NOT affect score. Evaluate intelligibility, stress, rhythm, connected speech, word/sentence stress.
-
 --------------------------------------------------
-PART-SPECIFIC EXPECTATIONS
---------------------------------------------------
-Part 1: 2–4 sentences per answer.
-Part 2: 1.5–2 minutes (introduce topic, describe details, give examples, express opinions, provide conclusion).
-Part 3: 5–8 sentences (explain, justify, compare, analyze, discuss causes/consequences).
-
---------------------------------------------------
-OUTPUT FORMAT
+OUTPUT FORMAT (STRICT JSON ONLY)
 --------------------------------------------------
 Return ONLY valid JSON matching this exact structure:
 
 {
-  "fluency_coherence": 7.0,
-  "lexical_resource": 7.5,
-  "grammatical_range_accuracy": 6.5,
-  "pronunciation": 7.5,
-  "average": 7.125,
-  "overall_band": 7.0,
-  "strengths": ["...", "..."],
-  "weaknesses": ["...", "..."],
+  "overall_band": 6.5,
+  "estimated_band_reason": "Detailed rationale explaining why this overall band score was awarded based on official IELTS criteria.",
+  "fluency_coherence": 6.5,
+  "lexical_resource": 6.5,
+  "grammatical_range_accuracy": 6.0,
+  "pronunciation": 7.0,
+  "overall_feedback": "Summary assessment of performance.",
   "criterion_feedback": {
-    "fluency": "...",
-    "vocabulary": "...",
-    "grammar": "...",
-    "pronunciation": "..."
+    "fluency": "Detailed fluency feedback...",
+    "vocabulary": "Detailed vocabulary feedback...",
+    "grammar": "Detailed grammar feedback...",
+    "pronunciation": "Detailed pronunciation feedback..."
   },
   "criterion_key_observations": {
-    "fluency": ["...", "..."],
-    "vocabulary": ["...", "..."],
-    "grammar": ["...", "..."],
-    "pronunciation": ["...", "..."]
+    "fluency": ["Observation 1", "Observation 2"],
+    "vocabulary": ["Observation 1", "Observation 2"],
+    "grammar": ["Observation 1", "Observation 2"],
+    "pronunciation": ["Observation 1", "Observation 2"]
   },
   "filler_words": [
-    { "word": "like", "count": 2, "impact": "moderate" }
+    {"word": "like", "count": 4, "impact": "moderate"}
   ],
   "vocab_upgrades": [
-    { "original": "think", "upgrade": "reckon / maintain", "context_example": "I firmly maintain that..." }
+    {"original": "good", "upgrade": "beneficial", "context_example": "It is beneficial for students."}
   ],
-  "overall_feedback": "...",
-  "estimated_band_reason": "Explain why the candidate deserves this overall band using evidence from performance.",
+  "strengths": ["Clear pronunciation", "Good topic extension"],
+  "weaknesses": ["Frequent self-correction", "Limited complex grammar structures"],
   "per_question_items": [
     {
-      "question_id": "EXACT question_id provided in candidate responses input (e.g., p1-env-q1)",
+      "question_id": "p1_q1",
       "live_stt_transcript": "Raw Browser STT snippet (may be truncated)",
       "ai_generated_transcript": "EXACT transcript of what candidate actually spoke in audio. Correct STT mishearings, but DO NOT invent extra sentences or omit words.",
       "match_percentage": 75,
@@ -135,22 +126,31 @@ Return ONLY valid JSON matching this exact structure:
     }
   ]
 }
+
+DO NOT include any text outside the JSON object.
+
+--------------------------------------------------
+FEW-SHOT TRANSCRIPT FAITHFULNESS EXAMPLES:
+--------------------------------------------------
+
+EXAMPLE 1 (Candidate spoke 1 short sentence):
+Browser STT: "I would like to talk about Sunrise park it is a very big and beautiful party"
+ai_generated_transcript: "I would like to talk about Sunrise Park. It is a very big and beautiful park."
+(EXPLANATION: Corrected "party" to "park" based on audio context. NO EXTRA SENTENCES ADDED.)
+
+EXAMPLE 2 (Candidate paused or stopped after 15 seconds):
+Browser STT: "so I think there are two main ways to manage tourism sustainably first the management bus route"
+ai_generated_transcript: "So I think there are two main ways to manage tourism sustainably. First, the management must..."
+(EXPLANATION: FAITHFUL to actual audio capture. Did NOT generate 3 extra paragraphs of unsaid essay text.)
 `;
 
 function computeWordSimilarity(text1: string, text2: string): number {
-  if (!text1 || !text2) return 70;
-  const words1 = text1.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean);
-  const words2 = text2.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean);
-  if (words1.length === 0 || words2.length === 0) return 70;
-
-  const set2 = new Set(words2);
-  let matches = 0;
-  words1.forEach((w) => {
-    if (set2.has(w)) matches++;
-  });
-
-  const ratio = (matches * 2) / (words1.length + words2.length);
-  return Math.min(100, Math.max(50, Math.round(ratio * 100)));
+  const words1 = text1.toLowerCase().split(/\s+/).filter(Boolean);
+  const words2 = text2.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words1.length === 0 || words2.length === 0) return 0;
+  const set1 = new Set(words1);
+  const common = words2.filter((w) => set1.has(w)).length;
+  return Math.round((common / Math.max(words1.length, words2.length)) * 100);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -239,9 +239,7 @@ function repairTruncatedJson(jsonStr: string): any {
 export async function evaluateIELTSAttemptWithAI(
   attempt: IELTSSpeakingAttempt,
   topic: IELTSSpeakingTopic
-): Promise<IELTSScoreResult> {
-  const fallbackResult = calculateIELTSScore(attempt, topic);
-
+): Promise<IELTSScoreResult | null> {
   const apiKey =
     process.env.AI_API_KEY ||
     process.env.GEMINI_API_KEY ||
@@ -259,8 +257,8 @@ export async function evaluateIELTSAttemptWithAI(
   const model = process.env.AI_MODEL || process.env.ANTHROPIC_MODEL || 'gemini-3.7-flash-high';
 
   if (!apiKey || !endpoint) {
-    console.warn('[AI Evaluator Warning] No AI API Key or Endpoint found in env. Falling back to rule-based evaluation.');
-    return fallbackResult;
+    console.warn('[AI Evaluator Warning] No AI API Key or Endpoint found in env.');
+    return null;
   }
 
   // Construct structured question & transcript prompt
@@ -364,8 +362,8 @@ Please evaluate the candidate according to the official IELTS Examiner instructi
     clearTimeout(timeoutId);
 
     if (!res.ok || !res.body) {
-      console.warn(`[AI Evaluator Warning] API status ${res.status}. Using rule-based score fallback.`);
-      return fallbackResult;
+      console.warn(`[AI Evaluator Warning] API status ${res.status}. AI evaluation pending.`);
+      return null;
     }
 
     // Stream SSE aggregation
@@ -400,8 +398,8 @@ Please evaluate the candidate according to the official IELTS Examiner instructi
     }
 
     if (!rawContent) {
-      console.warn('[AI Evaluator Warning] Empty response content. Using fallback result.');
-      return fallbackResult;
+      console.warn('[AI Evaluator Warning] Empty response content. AI evaluation pending.');
+      return null;
     }
 
     console.log(`[AI Evaluator] Received response (${rawContent.length} chars). Parsing JSON...`);
@@ -413,10 +411,10 @@ Please evaluate the candidate according to the official IELTS Examiner instructi
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const parsed: any = repairTruncatedJson(jsonString);
 
-    const fcScore = Math.min(9.0, Math.max(1.0, Number(parsed.fluency_coherence) || fallbackResult.criteria_scores[0].score));
-    const lrScore = Math.min(9.0, Math.max(1.0, Number(parsed.lexical_resource) || fallbackResult.criteria_scores[1].score));
-    const graScore = Math.min(9.0, Math.max(1.0, Number(parsed.grammatical_range_accuracy) || fallbackResult.criteria_scores[2].score));
-    const prScore = Math.min(9.0, Math.max(1.0, Number(parsed.pronunciation) || fallbackResult.criteria_scores[3].score));
+    const fcScore = Math.min(9.0, Math.max(1.0, Number(parsed.fluency_coherence) || 6.0));
+    const lrScore = Math.min(9.0, Math.max(1.0, Number(parsed.lexical_resource) || 6.0));
+    const graScore = Math.min(9.0, Math.max(1.0, Number(parsed.grammatical_range_accuracy) || 6.0));
+    const prScore = Math.min(9.0, Math.max(1.0, Number(parsed.pronunciation) || 6.0));
 
     const overallBand = Number(parsed.overall_band) || Math.round(((fcScore + lrScore + graScore + prScore) / 4) * 2) / 2;
 
@@ -460,62 +458,56 @@ Please evaluate the candidate according to the official IELTS Examiner instructi
     });
 
     return {
-      ...fallbackResult,
+      attempt_id: attempt.id,
+      topic_title: topic.title,
+      part1_questions: topic.part1_questions,
+      part2_cue_card: topic.part2_cue_card,
+      part3_questions: topic.part3_questions,
+      responses: attempt.responses,
+      part2_notes: attempt.part2_notes,
       overall_band: overallBand,
       status_title: getIELTSStatusTitle(overallBand),
-      summary_feedback: parsed.overall_feedback || fallbackResult.summary_feedback,
+      summary_feedback: parsed.overall_feedback || 'AI evaluation generated successfully.',
       criteria_scores: [
         {
           code: 'FC',
           name: 'Fluency & Coherence',
           score: fcScore,
-          summary: parsed.criterion_feedback?.fluency || fallbackResult.criteria_scores[0].summary,
-          key_observations: Array.isArray(parsed.criterion_key_observations?.fluency) && parsed.criterion_key_observations.fluency.length > 0
-            ? parsed.criterion_key_observations.fluency
-            : fallbackResult.criteria_scores[0].key_observations,
+          summary: parsed.criterion_feedback?.fluency || 'Fluency assessment provided.',
+          key_observations: Array.isArray(parsed.criterion_key_observations?.fluency) ? parsed.criterion_key_observations.fluency : [],
         },
         {
           code: 'LR',
           name: 'Lexical Resource',
           score: lrScore,
-          summary: parsed.criterion_feedback?.vocabulary || fallbackResult.criteria_scores[1].summary,
-          key_observations: Array.isArray(parsed.criterion_key_observations?.vocabulary) && parsed.criterion_key_observations.vocabulary.length > 0
-            ? parsed.criterion_key_observations.vocabulary
-            : fallbackResult.criteria_scores[1].key_observations,
+          summary: parsed.criterion_feedback?.vocabulary || 'Vocabulary assessment provided.',
+          key_observations: Array.isArray(parsed.criterion_key_observations?.vocabulary) ? parsed.criterion_key_observations.vocabulary : [],
         },
         {
           code: 'GRA',
           name: 'Grammatical Range & Accuracy',
           score: graScore,
-          summary: parsed.criterion_feedback?.grammar || fallbackResult.criteria_scores[2].summary,
-          key_observations: Array.isArray(parsed.criterion_key_observations?.grammar) && parsed.criterion_key_observations.grammar.length > 0
-            ? parsed.criterion_key_observations.grammar
-            : fallbackResult.criteria_scores[2].key_observations,
+          summary: parsed.criterion_feedback?.grammar || 'Grammar assessment provided.',
+          key_observations: Array.isArray(parsed.criterion_key_observations?.grammar) ? parsed.criterion_key_observations.grammar : [],
         },
         {
           code: 'PR',
           name: 'Pronunciation',
           score: prScore,
-          summary: parsed.criterion_feedback?.pronunciation || fallbackResult.criteria_scores[3].summary,
-          key_observations: Array.isArray(parsed.criterion_key_observations?.pronunciation) && parsed.criterion_key_observations.pronunciation.length > 0
-            ? parsed.criterion_key_observations.pronunciation
-            : fallbackResult.criteria_scores[3].key_observations,
+          summary: parsed.criterion_feedback?.pronunciation || 'Pronunciation assessment provided.',
+          key_observations: Array.isArray(parsed.criterion_key_observations?.pronunciation) ? parsed.criterion_key_observations.pronunciation : [],
         },
       ],
-      filler_words: Array.isArray(parsed.filler_words) && parsed.filler_words.length > 0
-        ? parsed.filler_words
-        : fallbackResult.filler_words,
-      vocab_upgrades: Array.isArray(parsed.vocab_upgrades) && parsed.vocab_upgrades.length > 0
-        ? parsed.vocab_upgrades
-        : fallbackResult.vocab_upgrades,
-      strengths: Array.isArray(parsed.strengths) && parsed.strengths.length > 0 ? parsed.strengths : fallbackResult.strengths,
-      areas_for_improvement: Array.isArray(parsed.weaknesses) && parsed.weaknesses.length > 0 ? parsed.weaknesses : fallbackResult.areas_for_improvement,
+      filler_words: Array.isArray(parsed.filler_words) ? parsed.filler_words : [],
+      vocab_upgrades: Array.isArray(parsed.vocab_upgrades) ? parsed.vocab_upgrades : [],
+      strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
+      areas_for_improvement: Array.isArray(parsed.weaknesses) ? parsed.weaknesses : [],
       criterion_feedback: parsed.criterion_feedback,
       estimated_band_reason: parsed.estimated_band_reason,
       per_question_analysis: perQuestionRecord,
     };
   } catch (err) {
     console.error('[AI Evaluator Error]:', err);
-    return fallbackResult;
+    return null;
   }
 }

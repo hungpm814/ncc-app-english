@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { pgDb } from '@/lib/db/postgres';
-import { calculateIELTSScore } from '@/lib/ielts/score-calculator';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ attemptId: string }> }) {
   const session = await getSession();
@@ -23,12 +22,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ atte
     }
 
     if (attempt.status === 'submitted') {
-      const scoreResult = attempt.score_result || calculateIELTSScore(attempt, topic);
       return NextResponse.json({
         success: true,
         attempt,
         topic,
-        result: scoreResult,
+        result: attempt.score_result || null,
       });
     }
 
