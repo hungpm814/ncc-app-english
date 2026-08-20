@@ -19,13 +19,16 @@ Be objective, evidence-based, and consistent.
 Evaluate only what the candidate actually says.
 
 --------------------------------------------------
-IMPORTANT INSTRUCTION ON BROWSER STT vs FULL TRANSCRIPT
+IMPORTANT INSTRUCTION: 100% FAITHFUL AUDIO TRANSCRIPT ONLY
 --------------------------------------------------
-1. The provided "Browser STT (Raw/Partial)" text is recorded by client-side Web Speech API and FREQUENTLY CUTS OFF OR GETS TRUNCATED mid-response while the candidate is still speaking.
-2. For each question, your output field "ai_generated_transcript" MUST represent the candidate's FULL, COMPLETE, AND UNTRUNCATED spoken response for the entire duration of their answer.
-3. If the Browser STT snippet ends abruptly or cuts off mid-sentence/mid-thought, reconstruct and extend the complete, natural, and grammatically complete spoken response that matches the candidate's line of thought. Do NOT stop early just because Browser STT was cut off.
-4. "match_percentage": Calculate what percentage of the full complete spoken transcript was successfully captured in the raw Browser STT snippet (0–100%).
-5. Base your official IELTS band scoring (FC, LR, GRA, PR) on the candidate's complete reconstructed response.
+1. "ai_generated_transcript" MUST MATCH THE CANDIDATE'S ACTUAL SPOKEN AUDIO 100%.
+2. STRICTLY FORBIDDEN: DO NOT ADD, INVENT, OR EXTEND ANY SENTENCES, CLAUSES, REASONS, OR EXAMPLES THAT THE CANDIDATE DID NOT UTTER IN THEIR AUDIO.
+   - If the candidate spoke only 1 sentence, the transcript MUST BE EXACTLY THAT 1 SENTENCE.
+   - ABSOLUTELY DO NOT APPEND EXTRA SENTENCES to pad, expand, or lengthen the candidate's response.
+3. STRICTLY FORBIDDEN: DO NOT OMIT, CUT OFF, OR SHORTEN ANY WORDS SPOKEN BY THE CANDIDATE.
+4. PERMISSIBLE CLEANUP ONLY: You may only correct minor Speech-to-Text (STT) phonetic recognition glitches and add proper punctuation/capitalization to the candidate's exact words (e.g., fixing "make is" to "makes it" or "live in a city is" to "live in a city, which is").
+5. "match_percentage": Calculate the similarity percentage between the raw Browser STT text snippet and the candidate's 100% faithful audio transcript (0–100%).
+6. BASE BAND SCORE: Score FC, LR, GRA, PR based strictly on what the candidate actually uttered in their audio.
 
 --------------------------------------------------
 SCORING CRITERIA
@@ -103,15 +106,32 @@ Return ONLY valid JSON matching this exact structure:
     "grammar": "...",
     "pronunciation": "..."
   },
+  "criterion_key_observations": {
+    "fluency": ["...", "..."],
+    "vocabulary": ["...", "..."],
+    "grammar": ["...", "..."],
+    "pronunciation": ["...", "..."]
+  },
+  "filler_words": [
+    { "word": "like", "count": 2, "impact": "moderate" }
+  ],
+  "vocab_upgrades": [
+    { "original": "think", "upgrade": "reckon / maintain", "context_example": "I firmly maintain that..." }
+  ],
   "overall_feedback": "...",
   "estimated_band_reason": "Explain why the candidate deserves this overall band using evidence from performance.",
   "per_question_items": [
     {
-      "question_id": "p1-q1",
+      "question_id": "EXACT question_id provided in candidate responses input (e.g., p1-env-q1)",
       "live_stt_transcript": "Raw Browser STT snippet (may be truncated)",
-      "ai_generated_transcript": "FULL complete reconstructed spoken transcript. Completes any cut-off sentences naturally.",
+      "ai_generated_transcript": "EXACT transcript of what candidate actually spoke in audio. Correct STT mishearings, but DO NOT invent extra sentences or omit words.",
       "match_percentage": 75,
-      "feedback": "Concise feedback for this answer"
+      "feedback": "Detailed examiner assessment of candidate's fluency, vocabulary, and grammar for this answer.",
+      "grammar_corrections": [
+        "Incorrect: 'I live in city' → Correct: 'I live in a big city'",
+        "Avoid using 'good' repeatedly; replace with 'vibrant' or 'flourishing'"
+      ],
+      "improved_version": "Model answer rewriting candidate response with advanced vocabulary and structure."
     }
   ]
 }
@@ -131,6 +151,108 @@ function computeWordSimilarity(text1: string, text2: string): number {
 
   const ratio = (matches * 2) / (words1.length + words2.length);
   return Math.min(100, Math.max(50, Math.round(ratio * 100)));
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function repairTruncatedJson(jsonStr: string): any {
+  let str = jsonStr.trim();
+  try {
+    return JSON.parse(str);
+  } catch {
+    console.warn('[AI Evaluator] Truncated JSON detected. Attempting automatic repair...');
+  }
+
+  // 1. Close unclosed string literal if truncated mid-string
+  let inString = false;
+  let isEscaped = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (ch === '\\' && !isEscaped) {
+      isEscaped = true;
+    } else {
+      if (ch === '"' && !isEscaped) {
+        inString = !inString;
+      }
+      isEscaped = false;
+    }
+  }
+
+  if (inString) {
+    str += '"';
+  }
+
+  // 2. Remove trailing commas or colons before closing
+  str = str.replace(/,[\s\n\r]*$/, '').replace(/:[\s\n\r]*$/, ': ""');
+
+  // 3. Balance unclosed opening brackets & braces
+  const stack: string[] = [];
+  inString = false;
+  isEscaped = false;
+
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (ch === '\\' && !isEscaped) {
+      isEscaped = true;
+      continue;
+    }
+    if (ch === '"' && !isEscaped) {
+      inString = !inString;
+    } else if (!inString) {
+      if (ch === '{' || ch === '[') {
+        stack.push(ch);
+      } else if (ch === '}' || ch === ']') {
+        stack.pop();
+      }
+    }
+    isEscaped = false;
+  }
+
+  while (stack.length > 0) {
+    const last = stack.pop();
+    if (last === '{') str += '}';
+    if (last === '[') str += ']';
+  }
+
+  try {
+    return JSON.parse(str);
+  } catch (secondErr) {
+    console.warn('[AI Evaluator] Secondary JSON repair fallback:', secondErr);
+    // Strip trailing incomplete JSON property
+    const cleaned = str
+      .replace(/,\s*"[^"]*"?\s*:\s*[^,}\]]*$/, '')
+      .replace(/,\s*"[^"]*"$/, '')
+      .replace(/,\s*$/, '');
+
+    const stack2: string[] = [];
+    inString = false;
+    isEscaped = false;
+    for (let i = 0; i < cleaned.length; i++) {
+      const ch = cleaned[i];
+      if (ch === '\\' && !isEscaped) {
+        isEscaped = true;
+        continue;
+      }
+      if (ch === '"' && !isEscaped) {
+        inString = !inString;
+      } else if (!inString) {
+        if (ch === '{' || ch === '[') {
+          stack2.push(ch);
+        } else if (ch === '}' || ch === ']') {
+          stack2.pop();
+        }
+      }
+      isEscaped = false;
+    }
+
+    let finalStr = cleaned;
+    while (stack2.length > 0) {
+      const last = stack2.pop();
+      if (last === '{') finalStr += '}';
+      if (last === '[') finalStr += ']';
+    }
+
+    return JSON.parse(finalStr);
+  }
 }
 
 export async function evaluateIELTSAttemptWithAI(
@@ -198,7 +320,7 @@ Part 2 Preparation Notes by Candidate: "${attempt.part2_notes || 'None'}"
 CANDIDATE QUESTION RESPONSES:
 ${formattedResponses}
 
-REMINDER: The Browser STT transcript may be truncated mid-sentence. For "ai_generated_transcript", provide the FULL complete, un-truncated response representing what the candidate spoke during the entire recording duration, completing any cut-off sentences naturally.
+REMINDER: For "ai_generated_transcript", provide a 100% FAITHFUL transcript of what the candidate ACTUALLY SPOKE in their audio recording. Clean up STT recognition typos and punctuation, BUT STRICTLY DO NOT ADD, INVENT, OR EXTEND ANY EXTRA SENTENCES OR CLAUSES THAT WERE NOT SPOKEN BY THE CANDIDATE. If the candidate spoke only 1 sentence, return ONLY that 1 sentence.
 
 Please evaluate the candidate according to the official IELTS Examiner instructions and return JSON only.`;
 
@@ -218,21 +340,21 @@ Please evaluate the candidate according to the official IELTS Examiner instructi
 
     const reqBody = isOpenAIFormat
       ? {
-          model,
-          max_tokens: 4096,
-          stream: true,
-          messages: [
-            { role: 'system', content: OFFICIAL_IELTS_EXAMINER_PROMPT },
-            { role: 'user', content: userPrompt },
-          ],
-        }
+        model,
+        max_tokens: 8192,
+        stream: true,
+        messages: [
+          { role: 'system', content: OFFICIAL_IELTS_EXAMINER_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+      }
       : {
-          model,
-          max_tokens: 4096,
-          stream: true,
-          system: OFFICIAL_IELTS_EXAMINER_PROMPT,
-          messages: [{ role: 'user', content: userPrompt }],
-        };
+        model,
+        max_tokens: 8192,
+        stream: true,
+        system: OFFICIAL_IELTS_EXAMINER_PROMPT,
+        messages: [{ role: 'user', content: userPrompt }],
+      };
 
     const res = await fetch(endpoint, {
       method: 'POST',
@@ -291,7 +413,7 @@ Please evaluate the candidate according to the official IELTS Examiner instructi
     const jsonString = jsonMatch ? jsonMatch[1] : rawContent;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parsed: any = JSON.parse(jsonString.trim());
+    const parsed: any = repairTruncatedJson(jsonString);
 
     const fcScore = Math.min(9.0, Math.max(1.0, Number(parsed.fluency_coherence) || fallbackResult.criteria_scores[0].score));
     const lrScore = Math.min(9.0, Math.max(1.0, Number(parsed.lexical_resource) || fallbackResult.criteria_scores[1].score));
@@ -301,36 +423,42 @@ Please evaluate the candidate according to the official IELTS Examiner instructi
     const overallBand = Number(parsed.overall_band) || Math.round(((fcScore + lrScore + graScore + prScore) / 4) * 2) / 2;
 
     const perQuestionRecord: Record<string, IELTSPerQuestionAnalysis> = {};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parsedItems: any[] = Array.isArray(parsed.per_question_items) ? parsed.per_question_items : [];
 
-    if (Array.isArray(parsed.per_question_items)) {
+    questionItems.forEach((qItem, idx) => {
+      // 1. Try exact ID match
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      parsed.per_question_items.forEach((item: any) => {
-        const liveStt = item.live_stt_transcript || attempt.responses?.[item.question_id]?.transcript || '';
-        const aiTranscript = item.ai_generated_transcript || liveStt;
-        const matchPct = item.match_percentage || computeWordSimilarity(liveStt, aiTranscript);
+      let matchedItem = parsedItems.find((item: any) => item.question_id === qItem.id);
 
-        perQuestionRecord[item.question_id] = {
-          question_id: item.question_id,
-          live_stt_transcript: liveStt,
-          ai_generated_transcript: aiTranscript,
-          match_percentage: matchPct,
-          feedback: item.feedback || 'Good attempt on this question.',
-        };
-      });
-    }
-
-    // Populate fallback for any missing question items
-    questionItems.forEach((qItem) => {
-      if (!perQuestionRecord[qItem.id]) {
-        const liveStt = attempt.responses?.[qItem.id]?.transcript || '';
-        perQuestionRecord[qItem.id] = {
-          question_id: qItem.id,
-          live_stt_transcript: liveStt,
-          ai_generated_transcript: liveStt,
-          match_percentage: computeWordSimilarity(liveStt, liveStt),
-          feedback: 'Candidate provided response for this question.',
-        };
+      // 2. Try fuzzy string match on question_id
+      if (!matchedItem) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        matchedItem = parsedItems.find(
+          (item: any) =>
+            typeof item.question_id === 'string' &&
+            (item.question_id.includes(qItem.id) || qItem.id.includes(item.question_id))
+        );
       }
+
+      // 3. Fallback to index-based position matching
+      if (!matchedItem && parsedItems[idx]) {
+        matchedItem = parsedItems[idx];
+      }
+
+      const liveStt = attempt.responses?.[qItem.id]?.transcript || matchedItem?.live_stt_transcript || '';
+      const aiTranscript = matchedItem?.ai_generated_transcript || liveStt;
+      const matchPct = matchedItem?.match_percentage || computeWordSimilarity(liveStt, aiTranscript);
+
+      perQuestionRecord[qItem.id] = {
+        question_id: qItem.id,
+        live_stt_transcript: liveStt,
+        ai_generated_transcript: aiTranscript,
+        match_percentage: matchPct,
+        feedback: matchedItem?.feedback || 'Candidate provided response for this question.',
+        improved_version: matchedItem?.improved_version || undefined,
+        grammar_corrections: Array.isArray(matchedItem?.grammar_corrections) ? matchedItem.grammar_corrections : undefined,
+      };
     });
 
     return {
@@ -344,30 +472,44 @@ Please evaluate the candidate according to the official IELTS Examiner instructi
           name: 'Fluency & Coherence',
           score: fcScore,
           summary: parsed.criterion_feedback?.fluency || fallbackResult.criteria_scores[0].summary,
-          key_observations: fallbackResult.criteria_scores[0].key_observations,
+          key_observations: Array.isArray(parsed.criterion_key_observations?.fluency) && parsed.criterion_key_observations.fluency.length > 0
+            ? parsed.criterion_key_observations.fluency
+            : fallbackResult.criteria_scores[0].key_observations,
         },
         {
           code: 'LR',
           name: 'Lexical Resource',
           score: lrScore,
           summary: parsed.criterion_feedback?.vocabulary || fallbackResult.criteria_scores[1].summary,
-          key_observations: fallbackResult.criteria_scores[1].key_observations,
+          key_observations: Array.isArray(parsed.criterion_key_observations?.vocabulary) && parsed.criterion_key_observations.vocabulary.length > 0
+            ? parsed.criterion_key_observations.vocabulary
+            : fallbackResult.criteria_scores[1].key_observations,
         },
         {
           code: 'GRA',
           name: 'Grammatical Range & Accuracy',
           score: graScore,
           summary: parsed.criterion_feedback?.grammar || fallbackResult.criteria_scores[2].summary,
-          key_observations: fallbackResult.criteria_scores[2].key_observations,
+          key_observations: Array.isArray(parsed.criterion_key_observations?.grammar) && parsed.criterion_key_observations.grammar.length > 0
+            ? parsed.criterion_key_observations.grammar
+            : fallbackResult.criteria_scores[2].key_observations,
         },
         {
           code: 'PR',
           name: 'Pronunciation',
           score: prScore,
           summary: parsed.criterion_feedback?.pronunciation || fallbackResult.criteria_scores[3].summary,
-          key_observations: fallbackResult.criteria_scores[3].key_observations,
+          key_observations: Array.isArray(parsed.criterion_key_observations?.pronunciation) && parsed.criterion_key_observations.pronunciation.length > 0
+            ? parsed.criterion_key_observations.pronunciation
+            : fallbackResult.criteria_scores[3].key_observations,
         },
       ],
+      filler_words: Array.isArray(parsed.filler_words) && parsed.filler_words.length > 0
+        ? parsed.filler_words
+        : fallbackResult.filler_words,
+      vocab_upgrades: Array.isArray(parsed.vocab_upgrades) && parsed.vocab_upgrades.length > 0
+        ? parsed.vocab_upgrades
+        : fallbackResult.vocab_upgrades,
       strengths: Array.isArray(parsed.strengths) && parsed.strengths.length > 0 ? parsed.strengths : fallbackResult.strengths,
       areas_for_improvement: Array.isArray(parsed.weaknesses) && parsed.weaknesses.length > 0 ? parsed.weaknesses : fallbackResult.areas_for_improvement,
       criterion_feedback: parsed.criterion_feedback,

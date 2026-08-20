@@ -572,6 +572,7 @@ export const pgDb = {
       submitted_at: r.submitted_at ? new Date(r.submitted_at).toISOString() : undefined,
       part2_notes: r.part2_notes || undefined,
       band_score: r.overall_band ? parseFloat(r.overall_band) : undefined,
+      score_result: r.score_result ? (typeof r.score_result === 'string' ? JSON.parse(r.score_result) : r.score_result) : undefined,
       responses: responsesRecord,
     };
   },

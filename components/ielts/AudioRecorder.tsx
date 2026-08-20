@@ -31,6 +31,8 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
   const transcriptRef = useRef<string>('');
+  const isRecordingRef = useRef<boolean>(false);
+  const accumulatedTranscriptRef = useRef<string>('');
 
   const stopTimer = () => {
     if (timerIntervalRef.current) {
@@ -40,8 +42,10 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   };
 
   const stopSpeechRecognition = () => {
+    isRecordingRef.current = false;
     if (recognitionRef.current) {
       try {
+        recognitionRef.current.onend = null;
         recognitionRef.current.stop();
       } catch {
         // Ignored
@@ -52,6 +56,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
 
   useEffect(() => {
     setIsRecording(false);
+    isRecordingRef.current = false;
     setRecordingTime(0);
     recordingTimeRef.current = 0;
     setAudioUrl(null);
@@ -59,6 +64,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     setPermissionError(null);
     setLiveTranscript('');
     transcriptRef.current = '';
+    accumulatedTranscriptRef.current = '';
     audioChunksRef.current = [];
 
     stopTimer();
@@ -70,6 +76,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   }, [questionId]);
 
   const stopRecording = () => {
+    isRecordingRef.current = false;
     stopTimer();
     stopSpeechRecognition();
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -84,6 +91,8 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       setAudioUrl(null);
       setLiveTranscript('');
       transcriptRef.current = '';
+      accumulatedTranscriptRef.current = '';
+      isRecordingRef.current = true;
 
       if (isPlaying && audioPlayerRef.current) {
         audioPlayerRef.current.pause();
@@ -91,6 +100,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       }
       stopTimer();
       stopSpeechRecognition();
+      isRecordingRef.current = true;
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
@@ -104,6 +114,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       };
 
       mediaRecorder.onstop = () => {
+        isRecordingRef.current = false;
         stopTimer();
         stopSpeechRecognition();
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
@@ -133,10 +144,12 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         stream.getTracks().forEach((track) => track.stop());
       };
 
-      // Start Web Speech Recognition if supported
+      // Start Web Speech Recognition if supported with auto-restart on timeout
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const WindowSpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (WindowSpeechRecognition) {
+
+      const initSpeechRecognition = () => {
+        if (!WindowSpeechRecognition || !isRecordingRef.current) return;
         try {
           const recognition = new WindowSpeechRecognition();
           recognition.continuous = true;
@@ -145,12 +158,13 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           recognition.onresult = (event: any) => {
-            let current = '';
+            let sessionText = '';
             for (let i = 0; i < event.results.length; i++) {
-              current += event.results[i][0].transcript;
+              sessionText += event.results[i][0].transcript + ' ';
             }
-            setLiveTranscript(current);
-            transcriptRef.current = current;
+            const fullText = (accumulatedTranscriptRef.current + ' ' + sessionText).replace(/\s+/g, ' ').trim();
+            setLiveTranscript(fullText);
+            transcriptRef.current = fullText;
           };
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -158,12 +172,28 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
             console.warn('[Speech Recognition Warning]:', err);
           };
 
+          recognition.onend = () => {
+            if (transcriptRef.current) {
+              accumulatedTranscriptRef.current = transcriptRef.current;
+            }
+            if (isRecordingRef.current) {
+              // Auto-restart recognition when browser stops it mid-recording
+              try {
+                recognition.start();
+              } catch {
+                initSpeechRecognition();
+              }
+            }
+          };
+
           recognition.start();
           recognitionRef.current = recognition;
         } catch (sttErr) {
           console.warn('[Speech Recognition Init Error]:', sttErr);
         }
-      }
+      };
+
+      initSpeechRecognition();
 
       mediaRecorder.start(100);
       setIsRecording(true);

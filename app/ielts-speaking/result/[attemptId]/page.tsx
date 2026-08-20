@@ -39,9 +39,11 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
 
   const [rescoring, setRescoring] = useState(false);
   const [rescoreSuccess, setRescoreSuccess] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   async function handleRescoreWithAI() {
     try {
+      setShowConfirmModal(false);
       setRescoring(true);
       setError(null);
       setRescoreSuccess(false);
@@ -94,13 +96,13 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
                 </div>
 
                 <button
-                  onClick={handleRescoreWithAI}
+                  onClick={() => setShowConfirmModal(true)}
                   disabled={rescoring}
                   className="inline-flex items-center gap-2 px-4 py-1.5 bg-white hover:bg-amber-50 text-purple-900 text-xs font-extrabold rounded-full transition-all shadow-md active:scale-95 disabled:opacity-50"
-                  title="Gửi bài làm qua API AI để chấm điểm lại"
+                  title="Re-evaluate speaking attempt using AI Examiner"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${rescoring ? 'animate-spin' : ''}`} />
-                  <span>{rescoring ? 'AI Đang Chấm Điểm Lại...' : '🤖 Chấm Điểm Lại Với AI'}</span>
+                  <span>{rescoring ? 'Re-scoring with AI...' : '🤖 Re-score with AI'}</span>
                 </button>
               </div>
 
@@ -109,7 +111,7 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
 
               {rescoreSuccess && (
                 <div className="inline-block px-3 py-1 bg-emerald-500/90 text-white text-xs font-bold rounded-lg animate-fade-in">
-                  ✓ Đã cập nhật kết quả chấm điểm AI mới nhất thành công!
+                  ✓ Successfully updated with latest AI evaluation results!
                 </div>
               )}
             </div>
@@ -258,6 +260,42 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
             <span>Return to Home</span>
           </button>
         </div>
+
+        {/* Re-score Confirmation Modal */}
+        {showConfirmModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl space-y-6">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-purple-100 text-purple-700 rounded-2xl">
+                  <Sparkles className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">Re-evaluate with AI?</h3>
+                  <p className="text-xs text-slate-500 font-medium">IELTS Examiner AI Scoring</p>
+                </div>
+              </div>
+
+              <p className="text-sm text-slate-600 leading-relaxed font-medium">
+                Are you sure you want to re-score this attempt using the AI Examiner? This will re-evaluate your recorded responses and update your Band Score report.
+              </p>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  onClick={() => setShowConfirmModal(false)}
+                  className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleRescoreWithAI}
+                  className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold rounded-xl transition-all shadow-md shadow-purple-200"
+                >
+                  Confirm & Re-score
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

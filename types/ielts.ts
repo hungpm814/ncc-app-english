@@ -53,6 +53,7 @@ export interface IELTSSpeakingAttempt {
   responses: Record<string, IELTSSpeakingResponse>; // question_id -> response
   part2_notes?: string;
   band_score?: number;
+  score_result?: IELTSScoreResult;
 }
 
 export interface IELTSCriteriaScore {
@@ -82,6 +83,8 @@ export interface IELTSPerQuestionAnalysis {
   ai_generated_transcript: string;
   match_percentage: number;
   feedback: string;
+  improved_version?: string;
+  grammar_corrections?: string[];
 }
 
 export interface IELTSScoreResult {

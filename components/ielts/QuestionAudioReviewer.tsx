@@ -117,13 +117,12 @@ export function QuestionAudioReviewer({ result }: { result: IELTSScoreResult }) 
             <button
               key={item.id}
               onClick={() => setCurrentIndex(idx)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all border ${
-                isSelected
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all border ${isSelected
                   ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
                   : hasAudio
-                  ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
-                  : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
-              }`}
+                    ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
+                    : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                }`}
             >
               {item.partName === 'Part 2' ? 'Cue Card' : `Q${idx + 1}`}
             </button>
@@ -218,13 +217,12 @@ export function QuestionAudioReviewer({ result }: { result: IELTSScoreResult }) 
                     </div>
                     {matchPct !== undefined ? (
                       <span
-                        className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                          matchPct >= 80
+                        className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${matchPct >= 80
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                             : matchPct >= 60
-                            ? 'bg-amber-50 text-amber-800 border-amber-200'
-                            : 'bg-rose-50 text-rose-700 border-rose-200'
-                        }`}
+                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : 'bg-rose-50 text-rose-700 border-rose-200'
+                          }`}
                       >
                         <CheckCircle2 className="w-3 h-3" />
                         STT Capture Match: {matchPct}%
@@ -251,6 +249,37 @@ export function QuestionAudioReviewer({ result }: { result: IELTSScoreResult }) 
                   </div>
                   <p className="text-xs text-purple-800 leading-relaxed font-medium">
                     {aiAnalysis.feedback}
+                  </p>
+                </div>
+              )}
+
+              {/* Grammar Corrections */}
+              {aiAnalysis?.grammar_corrections && aiAnalysis.grammar_corrections.length > 0 && (
+                <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-4 space-y-2">
+                  <div className="text-xs font-bold text-amber-900 uppercase tracking-wider flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-amber-600" />
+                    <span>Grammar & Phrasing Corrections</span>
+                  </div>
+                  <ul className="space-y-1 text-xs text-amber-800 font-medium">
+                    {aiAnalysis.grammar_corrections.map((corr, cIdx) => (
+                      <li key={cIdx} className="flex items-start gap-2">
+                        <span className="text-amber-500 font-bold">•</span>
+                        <span>{corr}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Model Answer */}
+              {aiAnalysis?.improved_version && (
+                <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl p-4 space-y-2">
+                  <div className="text-xs font-bold text-emerald-900 uppercase tracking-wider flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-emerald-600" />
+                    <span>Model Response (Ideal Answer)</span>
+                  </div>
+                  <p className="text-xs text-emerald-850 italic font-medium leading-relaxed">
+                    "{aiAnalysis.improved_version}"
                   </p>
                 </div>
               )}

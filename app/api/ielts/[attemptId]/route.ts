@@ -23,7 +23,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ atte
     }
 
     if (attempt.status === 'submitted') {
-      const scoreResult = calculateIELTSScore(attempt, topic);
+      const scoreResult = attempt.score_result || calculateIELTSScore(attempt, topic);
       return NextResponse.json({
         success: true,
         attempt,
