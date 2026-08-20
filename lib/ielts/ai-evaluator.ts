@@ -126,12 +126,12 @@ Return ONLY valid JSON matching this exact structure:
       "live_stt_transcript": "Raw Browser STT snippet (may be truncated)",
       "ai_generated_transcript": "EXACT transcript of what candidate actually spoke in audio. Correct STT mishearings, but DO NOT invent extra sentences or omit words.",
       "match_percentage": 75,
-      "feedback": "Detailed examiner assessment of candidate's fluency, vocabulary, and grammar for this answer.",
+      "feedback": "Concise 1-2 sentence examiner assessment of candidate's fluency, vocabulary, and grammar for this answer.",
       "grammar_corrections": [
         "Incorrect: 'I live in city' → Correct: 'I live in a big city'",
-        "Avoid using 'good' repeatedly; replace with 'vibrant' or 'flourishing'"
+        "Word choice: Replace 'good' with 'vibrant'"
       ],
-      "improved_version": "Model answer rewriting candidate response with advanced vocabulary and structure."
+      "improved_version": "Concise Band 8.5+ model answer (2-3 sentences max for Part 1/3, 4-5 sentences max for Part 2)."
     }
   ]
 }
@@ -155,79 +155,48 @@ function computeWordSimilarity(text1: string, text2: string): number {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function repairTruncatedJson(jsonStr: string): any {
-  let str = jsonStr.trim();
+  const str = jsonStr.trim();
   try {
     return JSON.parse(str);
   } catch {
     console.warn('[AI Evaluator] Truncated JSON detected. Attempting automatic repair...');
   }
 
-  // 1. Close unclosed string literal if truncated mid-string
-  let inString = false;
-  let isEscaped = false;
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i];
-    if (ch === '\\' && !isEscaped) {
-      isEscaped = true;
-    } else {
-      if (ch === '"' && !isEscaped) {
-        inString = !inString;
-      }
-      isEscaped = false;
-    }
-  }
+  // Iterative repair: progressively backtrack from the truncated tail to find the last clean JSON state
+  for (let len = str.length; len > 10; len--) {
+    let candidate = str.substring(0, len).trim();
 
-  if (inString) {
-    str += '"';
-  }
+    // Strip trailing incomplete syntax like commas, colons, or unclosed quotes
+    candidate = candidate.replace(/[,:\s]+$/, '');
 
-  // 2. Remove trailing commas or colons before closing
-  str = str.replace(/,[\s\n\r]*$/, '').replace(/:[\s\n\r]*$/, ': ""');
-
-  // 3. Balance unclosed opening brackets & braces
-  const stack: string[] = [];
-  inString = false;
-  isEscaped = false;
-
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i];
-    if (ch === '\\' && !isEscaped) {
-      isEscaped = true;
-      continue;
-    }
-    if (ch === '"' && !isEscaped) {
-      inString = !inString;
-    } else if (!inString) {
-      if (ch === '{' || ch === '[') {
-        stack.push(ch);
-      } else if (ch === '}' || ch === ']') {
-        stack.pop();
+    // Check string quotation balance
+    let quoteCount = 0;
+    let isEscaped = false;
+    for (let i = 0; i < candidate.length; i++) {
+      if (candidate[i] === '\\' && !isEscaped) {
+        isEscaped = true;
+      } else {
+        if (candidate[i] === '"' && !isEscaped) {
+          quoteCount++;
+        }
+        isEscaped = false;
       }
     }
+
+    if (quoteCount % 2 !== 0) {
+      candidate += '"';
+    }
+
+    // Clean any trailing comma before closing structural elements
+    candidate = candidate.replace(/,[\s]*$/, '');
+
+    // Track and balance opening brackets & braces
+    const stack: string[] = [];
+    let inString = false;
     isEscaped = false;
-  }
 
-  while (stack.length > 0) {
-    const last = stack.pop();
-    if (last === '{') str += '}';
-    if (last === '[') str += ']';
-  }
-
-  try {
-    return JSON.parse(str);
-  } catch (secondErr) {
-    console.warn('[AI Evaluator] Secondary JSON repair fallback:', secondErr);
-    // Strip trailing incomplete JSON property
-    const cleaned = str
-      .replace(/,\s*"[^"]*"?\s*:\s*[^,}\]]*$/, '')
-      .replace(/,\s*"[^"]*"$/, '')
-      .replace(/,\s*$/, '');
-
-    const stack2: string[] = [];
-    inString = false;
-    isEscaped = false;
-    for (let i = 0; i < cleaned.length; i++) {
-      const ch = cleaned[i];
+    for (let i = 0; i < candidate.length; i++) {
+      const ch = candidate[i];
       if (ch === '\\' && !isEscaped) {
         isEscaped = true;
         continue;
@@ -236,23 +205,35 @@ function repairTruncatedJson(jsonStr: string): any {
         inString = !inString;
       } else if (!inString) {
         if (ch === '{' || ch === '[') {
-          stack2.push(ch);
+          stack.push(ch);
         } else if (ch === '}' || ch === ']') {
-          stack2.pop();
+          const expected = ch === '}' ? '{' : '[';
+          if (stack.length > 0 && stack[stack.length - 1] === expected) {
+            stack.pop();
+          }
         }
       }
       isEscaped = false;
     }
 
-    let finalStr = cleaned;
-    while (stack2.length > 0) {
-      const last = stack2.pop();
-      if (last === '{') finalStr += '}';
-      if (last === '[') finalStr += ']';
+    // Append closing brackets/braces in reverse order
+    while (stack.length > 0) {
+      const open = stack.pop();
+      if (open === '{') candidate += '}';
+      if (open === '[') candidate += ']';
     }
 
-    return JSON.parse(finalStr);
+    try {
+      const parsed = JSON.parse(candidate);
+      console.log(`[AI Evaluator] Successfully repaired truncated JSON (recovered ${candidate.length}/${str.length} chars).`);
+      return parsed;
+    } catch {
+      // Step back further and try again
+      continue;
+    }
   }
+
+  throw new SyntaxError('Failed to parse truncated JSON after full repair attempts.');
 }
 
 export async function evaluateIELTSAttemptWithAI(
@@ -261,9 +242,26 @@ export async function evaluateIELTSAttemptWithAI(
 ): Promise<IELTSScoreResult> {
   const fallbackResult = calculateIELTSScore(attempt, topic);
 
-  const apiKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || '';
-  const endpoint = process.env.ANTHROPIC_ENDPOINT || 'https://api.anthropic.com/v1/messages';
-  const model = process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022';
+  const apiKey =
+    process.env.AI_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.OPENAI_API_KEY ||
+    '';
+
+  const endpoint =
+    process.env.AI_ENDPOINT ||
+    process.env.ANTHROPIC_ENDPOINT ||
+    (process.env.GEMINI_API_KEY
+      ? `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash-high:generateContent?key=${process.env.GEMINI_API_KEY}`
+      : '');
+
+  const model = process.env.AI_MODEL || process.env.ANTHROPIC_MODEL || 'gemini-3.7-flash-high';
+
+  if (!apiKey || !endpoint) {
+    console.warn('[AI Evaluator Warning] No AI API Key or Endpoint found in env. Falling back to rule-based evaluation.');
+    return fallbackResult;
+  }
 
   // Construct structured question & transcript prompt
   const questionItems: Array<{ id: string; part: string; questionText: string; liveTranscript: string; duration: number }> = [];
