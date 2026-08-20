@@ -60,32 +60,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Immediately update status to 'submitted' so attempt cannot be lost or cancelled
+    // Save status as 'submitted' to PostgreSQL instantly
     await pgDb.updateIELTSAttemptStatus(attemptId, 'submitted', 'part3');
-
-    // Refresh attempt with saved responses
-    const updatedAttempt = await pgDb.getIELTSAttempt(attemptId);
-    if (!updatedAttempt) {
-      return NextResponse.json({ success: false, error: 'Attempt refresh failed' }, { status: 500 });
-    }
-
-    // Calculate score using AI Evaluator
-    const scoreResult = await evaluateIELTSAttemptWithAI(updatedAttempt, topic);
-
-    // Save status and score result to PostgreSQL if AI returned a result
-    if (scoreResult) {
-      await pgDb.updateIELTSAttemptStatus(
-        attemptId,
-        'submitted',
-        'part3',
-        scoreResult.overall_band,
-        scoreResult
-      );
-    }
 
     return NextResponse.json({
       success: true,
-      result: scoreResult,
+      attemptId,
     });
   } catch (error) {
     console.error('[POST /api/ielts/submit] Error:', error);

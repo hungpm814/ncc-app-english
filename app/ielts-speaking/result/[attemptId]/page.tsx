@@ -34,7 +34,13 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
           throw new Error(data.error || 'Failed to load result report');
         }
 
-        setResult(data.result || null);
+        if (data.result) {
+          setResult(data.result);
+        } else {
+          // Instant submit case: result is not yet generated. Auto-trigger AI evaluation!
+          setResult(null);
+          handleRescoreWithAI();
+        }
       } catch (err) {
         console.error('Fetch result error:', err);
         setError((err as Error).message);
@@ -91,7 +97,7 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
     return (
       <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-center items-center">
         <div className="w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mb-4" />
-        <p className="text-slate-600 font-medium">Analyzing speech transcripts & generating Band Score report...</p>
+        <p className="text-slate-600 font-medium">Loading IELTS test attempt details...</p>
       </div>
     );
   }
@@ -101,18 +107,38 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
       <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
         <Navbar />
         <main className="flex-1 max-w-2xl mx-auto px-4 py-20 w-full flex flex-col items-center justify-center text-center space-y-6">
-          <div className="p-4 bg-purple-100 text-purple-700 rounded-full shadow-inner">
-            <Clock className="w-12 h-12" />
-          </div>
-          <div className="space-y-2">
-            <div className="inline-block px-3 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full uppercase tracking-wider">
-              Status: Evaluation Pending
-            </div>
-            <h1 className="text-3xl font-extrabold text-slate-900">AI Scoring Pending</h1>
-            <p className="text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
-              Bài thi Speaking của bạn đã được ghi nhận. Hệ thống hiện chưa có bản chấm điểm từ AI Examiner. Nhấn nút bên dưới để tiến hành chấm điểm bằng AI.
-            </p>
-          </div>
+          {rescoring ? (
+            <>
+              <div className="relative flex items-center justify-center">
+                <div className="w-20 h-20 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin" />
+                <Sparkles className="w-8 h-8 text-purple-600 absolute animate-pulse" />
+              </div>
+              <div className="space-y-2">
+                <div className="inline-block px-3 py-1 bg-purple-100 text-purple-800 text-xs font-bold rounded-full uppercase tracking-wider animate-pulse">
+                  🤖 AI Examiner Evaluating Speech...
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">Evaluating Band Score</h1>
+                <p className="text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+                  Hệ thống AI đang phân tích bài nói của bạn theo 4 tiêu chí IELTS (FC, LR, GRA, PR). Quá trình này thường mất khoảng 15 – 30 giây...
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="p-4 bg-purple-100 text-purple-700 rounded-full shadow-inner">
+                <Clock className="w-12 h-12" />
+              </div>
+              <div className="space-y-2">
+                <div className="inline-block px-3 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full uppercase tracking-wider">
+                  Status: Evaluation Pending
+                </div>
+                <h1 className="text-3xl font-extrabold text-slate-900">AI Scoring Pending</h1>
+                <p className="text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+                  Bài thi Speaking của bạn đã được ghi nhận an toàn. Nhấn nút bên dưới để bắt đầu hoặc thử lại quá trình chấm điểm bằng AI.
+                </p>
+              </div>
+            </>
+          )}
 
           {error && (
             <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl text-xs font-medium max-w-md w-full">
@@ -127,7 +153,7 @@ export default function IELTSSpeakingResultPage({ params }: { params: Promise<{ 
               className="inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-2xl shadow-lg shadow-purple-200 transition-all disabled:opacity-50 active:scale-95"
             >
               <RefreshCw className={`w-4 h-4 ${rescoring ? 'animate-spin' : ''}`} />
-              <span>{rescoring ? 'Đang chấm điểm với AI...' : '🤖 Chấm điểm với AI (Re-score)'}</span>
+              <span>{rescoring ? 'Đang phân tích bài nói...' : '🤖 Chấm điểm lại với AI'}</span>
             </button>
 
             <button
