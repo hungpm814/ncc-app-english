@@ -333,23 +333,6 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         }
       };
 
-      let streamingStarted = false;
-      try {
-        await connectStreamingSTT();
-        streamingStarted = true;
-      } catch (error) {
-        console.warn("[Streaming STT Warning]:", error);
-        stopStreamingSTT();
-      }
-
-      if (!streamingStarted && WindowSpeechRecognition) {
-        initSpeechRecognition();
-      } else if (!streamingStarted) {
-        setPermissionError(
-          "Live transcription is unavailable. Check the STT provider configuration.",
-        );
-      }
-
       mediaRecorder.start(100);
       setIsRecording(true);
       setRecordingTime(0);
@@ -366,6 +349,20 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
           return nextTime;
         });
       }, 1000);
+
+      if (WindowSpeechRecognition) {
+        initSpeechRecognition();
+      } else {
+        try {
+          await connectStreamingSTT();
+        } catch (error) {
+          console.warn("[Streaming STT Warning]:", error);
+          stopStreamingSTT();
+          setPermissionError(
+            "Live transcription is unavailable. Check the STT provider configuration.",
+          );
+        }
+      }
     } catch (err) {
       console.error("Error accessing microphone:", err);
       setPermissionError(
