@@ -13,15 +13,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const apiKey = process.env.AI_API_KEY;
-  const endpoint = process.env.AI_ENDPOINT;
-  const model = process.env.AI_MODEL || "gemini-3.7-flash-high";
-  if (!apiKey || !endpoint) {
+  const apiKey = process.env.ASSEMBLYAI_API_KEY;
+  if (!apiKey) {
     return NextResponse.json(
       {
         success: false,
         error:
-          "Mobile transcription is not configured. Add AI_API_KEY and AI_ENDPOINT to the server environment.",
+          "Mobile transcription is not configured. Add ASSEMBLYAI_API_KEY to the server environment.",
       },
       { status: 503 },
     );
@@ -39,41 +37,72 @@ export async function POST(request: NextRequest) {
     }
 
     const audioBuffer = Buffer.from(await audio.arrayBuffer());
-    const mimeType = audio.type || "audio/webm";
-    const audioDataUrl = `data:${mimeType};base64,${audioBuffer.toString("base64")}`;
-
-    const response = await fetch(endpoint, {
+    const uploadResponse = await fetch("https://api.assemblyai.com/v2/upload", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are an accurate English speech transcription service. Return only the exact spoken words. Do not add, explain, summarize, or correct the words.",
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: "Transcribe this English speaking-test recording. Return transcript text only.",
-              },
-              { type: "audio_url", audio_url: { url: audioDataUrl } },
-            ],
-          },
-        ],
-      }),
+      headers: { Authorization: apiKey },
+      body: audioBuffer,
     });
+    const uploadData = await uploadResponse.json();
+    if (!uploadResponse.ok || !uploadData.upload_url) {
+      console.error(
+        "[IELTS Transcription] AssemblyAI upload error:",
+        uploadData,
+      );
+      return NextResponse.json(
+        { success: false, error: "Audio upload failed." },
+        { status: 502 },
+      );
+    }
 
-    const data = await response.json();
-    if (!response.ok) {
-      console.error("[IELTS Transcription] AI endpoint error:", data);
+    const transcriptResponse = await fetch(
+      "https://api.assemblyai.com/v2/transcript",
+      {
+        method: "POST",
+        headers: {
+          Authorization: apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          audio_url: uploadData.upload_url,
+          language_code: "en_us",
+          speech_model: "best",
+        }),
+      },
+    );
+    const transcriptData = await transcriptResponse.json();
+    if (!transcriptResponse.ok || !transcriptData.id) {
+      console.error(
+        "[IELTS Transcription] AssemblyAI transcript error:",
+        transcriptData,
+      );
+      return NextResponse.json(
+        { success: false, error: "Audio transcription could not start." },
+        { status: 502 },
+      );
+    }
+
+    const deadline = Date.now() + 50_000;
+    let result = transcriptData;
+    while (result.status !== "completed" && result.status !== "error") {
+      if (Date.now() >= deadline) {
+        return NextResponse.json(
+          { success: false, error: "Audio transcription timed out." },
+          { status: 504 },
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const resultResponse = await fetch(
+        `https://api.assemblyai.com/v2/transcript/${transcriptData.id}`,
+        { headers: { Authorization: apiKey }, cache: "no-store" },
+      );
+      result = await resultResponse.json();
+    }
+
+    if (result.status === "error") {
+      console.error(
+        "[IELTS Transcription] AssemblyAI processing error:",
+        result,
+      );
       return NextResponse.json(
         { success: false, error: "Audio transcription failed." },
         { status: 502 },
@@ -81,9 +110,7 @@ export async function POST(request: NextRequest) {
     }
 
     const transcript =
-      typeof data.choices?.[0]?.message?.content === "string"
-        ? data.choices[0].message.content.trim()
-        : "";
+      typeof result.text === "string" ? result.text.trim() : "";
 
     return NextResponse.json({ success: true, transcript });
   } catch (error) {
