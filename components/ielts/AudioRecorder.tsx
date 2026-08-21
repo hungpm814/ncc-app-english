@@ -34,7 +34,6 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const [liveTranscript, setLiveTranscript] = useState<string>("");
-  const [isTranscribing, setIsTranscribing] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -45,9 +44,8 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   const recognitionRef = useRef<any>(null);
   const transcriptRef = useRef<string>("");
   const isRecordingRef = useRef<boolean>(false);
-  const accumulatedTranscriptRef = useRef<string>("");
+  const browserFinalTranscriptRef = useRef<string>("");
   const liveTranscriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const transcriptionInFlightRef = useRef(false);
   const sttSocketRef = useRef<WebSocket | null>(null);
   const finalTranscriptRef = useRef<string>("");
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -106,7 +104,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     setPermissionError(null);
     setLiveTranscript("");
     transcriptRef.current = "";
-    accumulatedTranscriptRef.current = "";
+    browserFinalTranscriptRef.current = "";
     finalTranscriptRef.current = "";
     audioChunksRef.current = [];
 
@@ -144,9 +142,8 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       setAudioUrl(null);
       setLiveTranscript("");
       transcriptRef.current = "";
-      accumulatedTranscriptRef.current = "";
+      browserFinalTranscriptRef.current = "";
       finalTranscriptRef.current = "";
-      transcriptionInFlightRef.current = false;
       isRecordingRef.current = true;
 
       if (isPlaying && audioPlayerRef.current) {
@@ -251,50 +248,6 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         });
       };
 
-      const transcribeCurrentAudio = async () => {
-        if (
-          transcriptionInFlightRef.current ||
-          audioChunksRef.current.length === 0
-        ) {
-          return;
-        }
-
-        transcriptionInFlightRef.current = true;
-        setIsTranscribing(true);
-        try {
-          const audioType = mediaRecorder.mimeType || "audio/webm";
-          const audioBlob = new Blob(audioChunksRef.current, {
-            type: audioType,
-          });
-          const fileExtension =
-            audioType.includes("mp4") || audioType.includes("m4a")
-              ? "m4a"
-              : "webm";
-          const formData = new FormData();
-          formData.append(
-            "audio",
-            audioBlob,
-            `speaking-${questionId}.${fileExtension}`,
-          );
-
-          const response = await fetch("/api/ielts/transcribe", {
-            method: "POST",
-            body: formData,
-          });
-          const data = await response.json();
-          if (response.ok && data.success && data.transcript) {
-            const transcript = data.transcript.trim();
-            setLiveTranscript(transcript);
-            transcriptRef.current = transcript;
-          }
-        } catch (error) {
-          console.warn("[Live Transcription Warning]:", error);
-        } finally {
-          transcriptionInFlightRef.current = false;
-          setIsTranscribing(false);
-        }
-      };
-
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
@@ -312,9 +265,6 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         const objectUrl = URL.createObjectURL(audioBlob);
         setAudioUrl(objectUrl);
 
-        if (!transcriptRef.current.trim()) {
-          await transcribeCurrentAudio();
-        }
         const finalTranscript = transcriptRef.current.trim();
 
         if (onAudioRecorded) {
@@ -340,19 +290,24 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           recognition.onresult = (event: any) => {
-            let sessionText = "";
+            let interimText = "";
             for (let i = 0; i < event.results.length; i++) {
-              sessionText += event.results[i][0].transcript + " ";
+              const text = event.results[i][0].transcript.trim();
+              if (event.results[i].isFinal) {
+                browserFinalTranscriptRef.current = `${browserFinalTranscriptRef.current} ${text}`
+                  .replace(/\s+/g, " ")
+                  .trim();
+              } else {
+                interimText = `${interimText} ${text}`
+                  .replace(/\s+/g, " ")
+                  .trim();
+              }
             }
-            const fullText = (
-              accumulatedTranscriptRef.current +
-              " " +
-              sessionText
-            )
+            const displayText = `${browserFinalTranscriptRef.current} ${interimText}`
               .replace(/\s+/g, " ")
               .trim();
-            setLiveTranscript(fullText);
-            transcriptRef.current = fullText;
+            setLiveTranscript(displayText);
+            transcriptRef.current = displayText;
           };
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -361,9 +316,6 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
           };
 
           recognition.onend = () => {
-            if (transcriptRef.current) {
-              accumulatedTranscriptRef.current = transcriptRef.current;
-            }
             if (isRecordingRef.current) {
               // Auto-restart recognition when browser stops it mid-recording
               try {
@@ -513,7 +465,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
               className="flex items-center gap-2.5 px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all shadow-md shadow-rose-200 animate-pulse"
             >
               <Square className="w-5 h-5 fill-current" />
-              <span>{isTranscribing ? "Transcribing..." : "Stop & Save"}</span>
+              <span>Stop & Save</span>
             </button>
           )}
 
@@ -552,17 +504,14 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       </div>
 
       {/* Real-time Speech-to-Text Live Preview */}
-      {(isRecording || liveTranscript || isTranscribing) && (
+      {(isRecording || liveTranscript) && (
         <div className="p-4 bg-purple-50/70 border border-purple-200 rounded-xl space-y-1 text-left">
           <div className="flex items-center gap-2 text-xs font-bold text-purple-700 uppercase tracking-wider">
             <Sparkles className="w-3.5 h-3.5 text-purple-600 animate-pulse" />
             <span>Live Speech-to-Text Transcript</span>
           </div>
           <p className="text-sm text-slate-800 font-medium leading-relaxed italic">
-            {isTranscribing
-              ? "Transcribing your recording..."
-              : liveTranscript ||
-                "Listening... Start speaking into your microphone."}
+            {liveTranscript || "Listening... Start speaking into your microphone."}
           </p>
         </div>
       )}
