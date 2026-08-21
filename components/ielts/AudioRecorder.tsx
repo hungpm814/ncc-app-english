@@ -191,7 +191,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
           socket.onerror = () =>
             reject(new Error("Streaming STT connection failed."));
           socket.onclose = () => {
-            if (isRecordingRef.current) {
+            if (isRecordingRef.current && sttSocketRef.current === socket) {
               setPermissionError(
                 "Live transcription connection was interrupted.",
               );
@@ -381,17 +381,21 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         }
       };
 
-      if (WindowSpeechRecognition) {
+      let streamingStarted = false;
+      try {
+        await connectStreamingSTT();
+        streamingStarted = true;
+      } catch (error) {
+        console.warn("[Streaming STT Warning]:", error);
+        stopStreamingSTT();
+      }
+
+      if (!streamingStarted && WindowSpeechRecognition) {
         initSpeechRecognition();
-      } else {
-        try {
-          await connectStreamingSTT();
-        } catch (error) {
-          console.warn("[Streaming STT Warning]:", error);
-          setPermissionError(
-            "Live transcription is unavailable. Check the STT provider configuration.",
-          );
-        }
+      } else if (!streamingStarted) {
+        setPermissionError(
+          "Live transcription is unavailable. Check the STT provider configuration.",
+        );
       }
 
       mediaRecorder.start(100);
