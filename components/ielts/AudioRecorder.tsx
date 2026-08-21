@@ -629,7 +629,16 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
           browserSupported,
         });
 
-        await connectStreamingSTT(stream);
+        try {
+          await connectStreamingSTT(stream);
+        } catch (error) {
+          // Keep recording so the final REST transcription can still process the audio.
+          console.warn(
+            "[Recorder] Live AssemblyAI transcription unavailable; continuing with recording:",
+            error,
+          );
+          activeSttSourceRef.current = null;
+        }
       }
 
       mediaRecorder.ondataavailable = (event) => {
