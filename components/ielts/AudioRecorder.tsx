@@ -48,6 +48,10 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   const accumulatedTranscriptRef = useRef<string>("");
   const liveTranscriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const transcriptionInFlightRef = useRef(false);
+  const sttSocketRef = useRef<WebSocket | null>(null);
+  const finalTranscriptRef = useRef<string>("");
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
 
   const stopTimer = () => {
     if (timerIntervalRef.current) {
@@ -60,6 +64,22 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     if (liveTranscriptionIntervalRef.current) {
       clearInterval(liveTranscriptionIntervalRef.current);
       liveTranscriptionIntervalRef.current = null;
+    }
+  };
+
+  const stopStreamingSTT = () => {
+    if (sttSocketRef.current) {
+      sttSocketRef.current.close();
+      sttSocketRef.current = null;
+    }
+    if (audioProcessorRef.current) {
+      audioProcessorRef.current.disconnect();
+      audioProcessorRef.current.onaudioprocess = null;
+      audioProcessorRef.current = null;
+    }
+    if (audioContextRef.current) {
+      void audioContextRef.current.close();
+      audioContextRef.current = null;
     }
   };
 
@@ -87,10 +107,12 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     setLiveTranscript("");
     transcriptRef.current = "";
     accumulatedTranscriptRef.current = "";
+    finalTranscriptRef.current = "";
     audioChunksRef.current = [];
 
     stopTimer();
     stopLiveTranscription();
+    stopStreamingSTT();
     stopSpeechRecognition();
 
     if (
@@ -105,6 +127,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     isRecordingRef.current = false;
     stopTimer();
     stopLiveTranscription();
+    stopStreamingSTT();
     stopSpeechRecognition();
     if (
       mediaRecorderRef.current &&
@@ -122,6 +145,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       setLiveTranscript("");
       transcriptRef.current = "";
       accumulatedTranscriptRef.current = "";
+      finalTranscriptRef.current = "";
       transcriptionInFlightRef.current = false;
       isRecordingRef.current = true;
 
@@ -131,6 +155,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       }
       stopTimer();
       stopLiveTranscription();
+      stopStreamingSTT();
       stopSpeechRecognition();
       isRecordingRef.current = true;
 
@@ -138,6 +163,93 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
+
+      const connectStreamingSTT = async () => {
+        const response = await fetch("/api/ielts/stt-token", {
+          cache: "no-store",
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success || !data.token) {
+          throw new Error(
+            data.error || "Could not start streaming transcription.",
+          );
+        }
+
+        await new Promise<void>((resolve, reject) => {
+          const params = new URLSearchParams({
+            sample_rate: "16000",
+            format_turns: "true",
+          });
+          const socket = new WebSocket(
+            `wss://streaming.assemblyai.com/v3/ws?${params.toString()}&token=${encodeURIComponent(data.token)}`,
+          );
+          sttSocketRef.current = socket;
+
+          socket.onopen = () => {
+            void audioContext.resume().then(resolve).catch(reject);
+          };
+          socket.onerror = () =>
+            reject(new Error("Streaming STT connection failed."));
+          socket.onclose = () => {
+            if (isRecordingRef.current) {
+              setPermissionError(
+                "Live transcription connection was interrupted.",
+              );
+            }
+          };
+          socket.onmessage = (event) => {
+            try {
+              const message = JSON.parse(event.data);
+              if (message.type !== "Turn") return;
+              const transcript = message.transcript?.trim();
+              if (!transcript) return;
+
+              if (message.end_of_turn) {
+                finalTranscriptRef.current =
+                  `${finalTranscriptRef.current} ${transcript}`
+                    .replace(/\s+/g, " ")
+                    .trim();
+              }
+
+              const displayTranscript =
+                `${finalTranscriptRef.current} ${message.end_of_turn ? "" : transcript}`
+                  .replace(/\s+/g, " ")
+                  .trim();
+              setLiveTranscript(displayTranscript);
+              transcriptRef.current =
+                finalTranscriptRef.current || displayTranscript;
+            } catch (error) {
+              console.warn("[Streaming STT Message Warning]:", error);
+            }
+          };
+
+          const audioContext = new AudioContext({ sampleRate: 16000 });
+          const source = audioContext.createMediaStreamSource(stream);
+          const processor = audioContext.createScriptProcessor(4096, 1, 1);
+          const silentGain = audioContext.createGain();
+          silentGain.gain.value = 0;
+          source.connect(processor);
+          processor.connect(silentGain);
+          silentGain.connect(audioContext.destination);
+          processor.onaudioprocess = (audioEvent) => {
+            if (socket.readyState !== WebSocket.OPEN) return;
+            const input = audioEvent.inputBuffer.getChannelData(0);
+            const sourceRate = audioContext.sampleRate;
+            const targetRate = 16000;
+            const step = sourceRate / targetRate;
+            const outputLength = Math.floor(input.length / step);
+            const pcm = new Int16Array(outputLength);
+            for (let index = 0; index < outputLength; index += 1) {
+              const sourceIndex = Math.min(Math.floor(index * step), input.length - 1);
+              const sample = Math.max(-1, Math.min(1, input[sourceIndex]));
+              pcm[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+            }
+            socket.send(pcm.buffer);
+          };
+          audioContextRef.current = audioContext;
+          audioProcessorRef.current = processor;
+        });
+      };
 
       const transcribeCurrentAudio = async () => {
         if (
@@ -193,6 +305,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         isRecordingRef.current = false;
         stopTimer();
         stopLiveTranscription();
+        stopStreamingSTT();
         stopSpeechRecognition();
         const audioType = mediaRecorder.mimeType || "audio/webm";
         const audioBlob = new Blob(audioChunksRef.current, { type: audioType });
@@ -211,7 +324,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         stream.getTracks().forEach((track) => track.stop());
       };
 
-      // Use browser STT when available; mobile browsers may require server transcription.
+      // Use browser STT when available; AssemblyAI streaming is the mobile-capable path.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const WindowSpeechRecognition =
         (window as any).SpeechRecognition ||
@@ -271,19 +384,14 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       if (WindowSpeechRecognition) {
         initSpeechRecognition();
       } else {
-        setPermissionError(
-          "Live transcript is connecting... Keep speaking while the recording is processed.",
-        );
-      }
-
-      // iOS Safari and some mobile browsers do not expose SpeechRecognition.
-      // Re-transcribe the growing recording so the transcript can still update while speaking.
-      if (!WindowSpeechRecognition) {
-        liveTranscriptionIntervalRef.current = setInterval(() => {
-          if (isRecordingRef.current) {
-            void transcribeCurrentAudio();
-          }
-        }, 4000);
+        try {
+          await connectStreamingSTT();
+        } catch (error) {
+          console.warn("[Streaming STT Warning]:", error);
+          setPermissionError(
+            "Live transcription is unavailable. Check the STT provider configuration.",
+          );
+        }
       }
 
       mediaRecorder.start(100);
