@@ -606,7 +606,14 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
 
       const browserSupported = Boolean(SpeechRecognition);
 
-      if (browserSupported) {
+      // Mobile browser speech recognition is inconsistent, especially on iOS
+      // and Chrome Android. Use the same PCM streaming path on mobile.
+      const userAgent = navigator.userAgent || navigator.vendor || "";
+      const isMobileBrowser =
+        /android|iphone|ipad|ipod|mobile/i.test(userAgent) ||
+        (navigator.maxTouchPoints > 1 && /macintosh/i.test(userAgent));
+
+      if (browserSupported && !isMobileBrowser) {
         const started = startBrowserSpeechRecognition();
 
         if (!started) {
@@ -616,6 +623,11 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         }
       } else {
         activeSttSourceRef.current = "assembly";
+
+        console.log("[Recorder] Using AssemblyAI streaming STT", {
+          isMobileBrowser,
+          browserSupported,
+        });
 
         await connectStreamingSTT(stream);
       }
