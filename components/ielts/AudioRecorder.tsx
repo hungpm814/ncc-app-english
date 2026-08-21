@@ -591,13 +591,8 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       startSpeechMonitor(stream);
 
       /**
-       * Decide STT provider.
-       *
-       * Desktop:
-       * Browser SpeechRecognition
-       *
-       * Mobile:
-       * AssemblyAI Streaming
+       * Prefer the browser recognizer when available because it provides
+       * reliable realtime updates on supported mobile browsers.
        */
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const SpeechRecognition =
@@ -606,20 +601,26 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
 
       const browserSupported = Boolean(SpeechRecognition);
 
-      // Mobile browser speech recognition is inconsistent, especially on iOS
-      // and Chrome Android. Use the same PCM streaming path on mobile.
       const userAgent = navigator.userAgent || navigator.vendor || "";
       const isMobileBrowser =
         /android|iphone|ipad|ipod|mobile/i.test(userAgent) ||
         (navigator.maxTouchPoints > 1 && /macintosh/i.test(userAgent));
 
-      if (browserSupported && !isMobileBrowser) {
+      if (browserSupported) {
         const started = startBrowserSpeechRecognition();
 
         if (!started) {
           activeSttSourceRef.current = "assembly";
 
-          await connectStreamingSTT(stream);
+          try {
+            await connectStreamingSTT(stream);
+          } catch (error) {
+            console.warn(
+              "[Recorder] Live AssemblyAI transcription unavailable; continuing with recording:",
+              error,
+            );
+            activeSttSourceRef.current = null;
+          }
         }
       } else {
         activeSttSourceRef.current = "assembly";
