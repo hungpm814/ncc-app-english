@@ -185,7 +185,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   /**
    * Browser Speech Recognition
    */
-  const startBrowserSpeechRecognition = () => {
+  const startBrowserSpeechRecognition = (stream: MediaStream) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const SpeechRecognition =
       (window as any).SpeechRecognition ||
@@ -247,7 +247,33 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       };
 
       recognition.onerror = (event: any) => {
-        console.warn("[Browser STT] Error:", event?.error);
+        const errorCode = event?.error;
+
+        console.warn("[Browser STT] Error:", errorCode);
+
+        if (
+          !isRecordingRef.current ||
+          activeSttSourceRef.current !== "browser" ||
+          errorCode === "aborted"
+        ) {
+          return;
+        }
+
+        activeSttSourceRef.current = "assembly";
+
+        try {
+          recognition.stop();
+        } catch {
+          // Ignore
+        }
+
+        void connectStreamingSTT(stream).catch((fallbackError) => {
+          console.warn(
+            "[Recorder] Browser STT failed and AssemblyAI fallback is unavailable:",
+            fallbackError,
+          );
+          activeSttSourceRef.current = null;
+        });
       };
 
       recognition.onend = () => {
@@ -607,7 +633,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         (navigator.maxTouchPoints > 1 && /macintosh/i.test(userAgent));
 
       if (browserSupported) {
-        const started = startBrowserSpeechRecognition();
+        const started = startBrowserSpeechRecognition(stream);
 
         if (!started) {
           activeSttSourceRef.current = "assembly";
