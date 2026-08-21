@@ -50,6 +50,9 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   const finalTranscriptRef = useRef<string>("");
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const vadContextRef = useRef<AudioContext | null>(null);
+  const vadFrameRef = useRef<number | null>(null);
+  const speechDetectedRef = useRef(false);
 
   const stopTimer = () => {
     if (timerIntervalRef.current) {
@@ -63,6 +66,43 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       clearInterval(liveTranscriptionIntervalRef.current);
       liveTranscriptionIntervalRef.current = null;
     }
+  };
+
+  const stopSpeechMonitor = () => {
+    if (vadFrameRef.current !== null) {
+      cancelAnimationFrame(vadFrameRef.current);
+      vadFrameRef.current = null;
+    }
+    if (vadContextRef.current) {
+      void vadContextRef.current.close();
+      vadContextRef.current = null;
+    }
+  };
+
+  const startSpeechMonitor = (stream: MediaStream) => {
+    speechDetectedRef.current = false;
+    const context = new AudioContext();
+    const source = context.createMediaStreamSource(stream);
+    const analyser = context.createAnalyser();
+    const samples = new Uint8Array(analyser.fftSize);
+    source.connect(analyser);
+    vadContextRef.current = context;
+
+    const monitor = () => {
+      if (vadContextRef.current !== context) return;
+      analyser.getByteTimeDomainData(samples);
+      let sum = 0;
+      for (const sample of samples) {
+        const normalized = (sample - 128) / 128;
+        sum += normalized * normalized;
+      }
+      const rms = Math.sqrt(sum / samples.length);
+      if (rms > 0.02) speechDetectedRef.current = true;
+      vadFrameRef.current = requestAnimationFrame(monitor);
+    };
+
+    void context.resume();
+    vadFrameRef.current = requestAnimationFrame(monitor);
   };
 
   const stopStreamingSTT = () => {
@@ -110,6 +150,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
 
     stopTimer();
     stopLiveTranscription();
+    stopSpeechMonitor();
     stopStreamingSTT();
     stopSpeechRecognition();
 
@@ -144,6 +185,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       transcriptRef.current = "";
       browserFinalTranscriptRef.current = "";
       finalTranscriptRef.current = "";
+      speechDetectedRef.current = false;
       isRecordingRef.current = true;
 
       if (isPlaying && audioPlayerRef.current) {
@@ -152,6 +194,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       }
       stopTimer();
       stopLiveTranscription();
+      stopSpeechMonitor();
       stopStreamingSTT();
       stopSpeechRecognition();
       isRecordingRef.current = true;
@@ -160,6 +203,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
+      startSpeechMonitor(stream);
 
       const connectStreamingSTT = async () => {
         const response = await fetch("/api/ielts/stt-token", {
@@ -173,6 +217,12 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         }
 
         await new Promise<void>((resolve, reject) => {
+          let settled = false;
+          const connectionTimeout = window.setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            reject(new Error("Streaming STT connection timed out."));
+          }, 8000);
           const params = new URLSearchParams({
             sample_rate: "16000",
             format_turns: "true",
@@ -183,10 +233,24 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
           sttSocketRef.current = socket;
 
           socket.onopen = () => {
-            void audioContext.resume().then(resolve).catch(reject);
+            void audioContext.resume().then(() => {
+              if (settled) return;
+              settled = true;
+              window.clearTimeout(connectionTimeout);
+              resolve();
+            }).catch((error) => {
+              if (settled) return;
+              settled = true;
+              window.clearTimeout(connectionTimeout);
+              reject(error);
+            });
           };
-          socket.onerror = () =>
+          socket.onerror = () => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(connectionTimeout);
             reject(new Error("Streaming STT connection failed."));
+          };
           socket.onclose = () => {
             if (isRecordingRef.current && sttSocketRef.current === socket) {
               setPermissionError(
@@ -198,6 +262,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
             try {
               const message = JSON.parse(event.data);
               if (message.type !== "Turn") return;
+              if (!speechDetectedRef.current) return;
               const transcript = message.transcript?.trim();
               if (!transcript) return;
 
@@ -258,6 +323,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         isRecordingRef.current = false;
         stopTimer();
         stopLiveTranscription();
+        stopSpeechMonitor();
         stopStreamingSTT();
         stopSpeechRecognition();
         const audioType = mediaRecorder.mimeType || "audio/webm";
@@ -265,7 +331,9 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         const objectUrl = URL.createObjectURL(audioBlob);
         setAudioUrl(objectUrl);
 
-        const finalTranscript = transcriptRef.current.trim();
+        const finalTranscript = speechDetectedRef.current
+          ? transcriptRef.current.trim()
+          : "";
 
         if (onAudioRecorded) {
           onAudioRecorded(objectUrl, finalTranscript, recordingTimeRef.current);
@@ -290,6 +358,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           recognition.onresult = (event: any) => {
+            if (!speechDetectedRef.current) return;
             let interimText = "";
             for (let i = 0; i < event.results.length; i++) {
               const text = event.results[i][0].transcript.trim();
@@ -350,18 +419,22 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         });
       }, 1000);
 
-      if (WindowSpeechRecognition) {
+      let streamingStarted = false;
+      try {
+        // Use the server-backed stream on phones even when webkitSpeechRecognition exists.
+        await connectStreamingSTT();
+        streamingStarted = true;
+      } catch (error) {
+        console.warn("[Streaming STT Warning]:", error);
+        stopStreamingSTT();
+      }
+
+      if (!streamingStarted && WindowSpeechRecognition) {
         initSpeechRecognition();
-      } else {
-        try {
-          await connectStreamingSTT();
-        } catch (error) {
-          console.warn("[Streaming STT Warning]:", error);
-          stopStreamingSTT();
-          setPermissionError(
-            "Live transcription is unavailable. Check the STT provider configuration.",
-          );
-        }
+      } else if (!streamingStarted) {
+        setPermissionError(
+          "Live transcription is unavailable. Check the STT provider configuration.",
+        );
       }
     } catch (err) {
       console.error("Error accessing microphone:", err);
