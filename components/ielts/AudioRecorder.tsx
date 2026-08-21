@@ -53,6 +53,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   const vadContextRef = useRef<AudioContext | null>(null);
   const vadFrameRef = useRef<number | null>(null);
   const speechDetectedRef = useRef(false);
+  const activeSttSourceRef = useRef<"browser" | "assembly" | null>(null);
 
   const stopTimer = () => {
     if (timerIntervalRef.current) {
@@ -146,6 +147,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     transcriptRef.current = "";
     browserFinalTranscriptRef.current = "";
     finalTranscriptRef.current = "";
+    activeSttSourceRef.current = null;
     audioChunksRef.current = [];
 
     stopTimer();
@@ -186,6 +188,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       browserFinalTranscriptRef.current = "";
       finalTranscriptRef.current = "";
       speechDetectedRef.current = false;
+      activeSttSourceRef.current = null;
       isRecordingRef.current = true;
 
       if (isPlaying && audioPlayerRef.current) {
@@ -265,6 +268,10 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
               if (!speechDetectedRef.current) return;
               const transcript = message.transcript?.trim();
               if (!transcript) return;
+              if (!activeSttSourceRef.current) {
+                activeSttSourceRef.current = "assembly";
+              }
+              if (activeSttSourceRef.current !== "assembly") return;
 
               if (message.end_of_turn) {
                 finalTranscriptRef.current =
@@ -359,6 +366,10 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           recognition.onresult = (event: any) => {
             if (!speechDetectedRef.current) return;
+            if (!activeSttSourceRef.current) {
+              activeSttSourceRef.current = "browser";
+            }
+            if (activeSttSourceRef.current !== "browser") return;
             let interimText = "";
             for (let i = 0; i < event.results.length; i++) {
               const text = event.results[i][0].transcript.trim();
@@ -419,23 +430,19 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         });
       }, 1000);
 
-      let streamingStarted = false;
-      try {
-        // Use the server-backed stream on phones even when webkitSpeechRecognition exists.
-        await connectStreamingSTT();
-        streamingStarted = true;
-      } catch (error) {
-        console.warn("[Streaming STT Warning]:", error);
-        stopStreamingSTT();
+      if (WindowSpeechRecognition) {
+        initSpeechRecognition();
       }
 
-      if (!streamingStarted && WindowSpeechRecognition) {
-        initSpeechRecognition();
-      } else if (!streamingStarted) {
-        setPermissionError(
-          "Live transcription is unavailable. Check the STT provider configuration.",
-        );
-      }
+      void connectStreamingSTT().catch((error) => {
+        console.warn("[Streaming STT Warning]:", error);
+        stopStreamingSTT();
+        if (!WindowSpeechRecognition) {
+          setPermissionError(
+            "Live transcription is unavailable. Check the STT provider configuration.",
+          );
+        }
+      });
     } catch (err) {
       console.error("Error accessing microphone:", err);
       setPermissionError(
